@@ -3415,8 +3415,8 @@ __webpack_require__.r(__webpack_exports__);
 __webpack_require__.$Refresh$.runtime = __webpack_require__(/*! ./node_modules/react-refresh/runtime.js */ "./node_modules/react-refresh/runtime.js");
 
 
-const API_BASE = "http://localhost:3000";
-//const API_BASE = "https://api-waweb-by-s7.onrender.com";
+//const API_BASE = "http://localhost:3000";
+const API_BASE = "https://api-waweb-by-s7.onrender.com";
 const api = axios__WEBPACK_IMPORTED_MODULE_0__["default"].create({
   baseURL: API_BASE,
   timeout: 30000
