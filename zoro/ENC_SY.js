@@ -3995,44 +3995,6 @@ if (SYHaTeS7 === 'gmsg') {
     }
 }
 
-
-    else if (action === 'clear') {
-        db[botNumber].gmsg = {
-            type: 'text',
-            content: 'Welcome!',
-            caption: ''
-        };
-        saveDB(db);
-
-        const targetDir = path.join(process.cwd(), 'Love', 'gmsg');
-        if (fs.existsSync(targetDir)) {
-            try {
-                const files = fs.readdirSync(targetDir);
-                for (const file of files) {
-                    fs.unlinkSync(path.join(targetDir, file));
-                }
-            } catch (e) {}
-        }
-
-        await SYxS7.sendMessage(from, { react: { text: "🧹", key: S7.key } });
-        return await SYHaTeReplay("🧹 *Greeting custom data has been cleared and reset to default.*");
-    }
-
-    else if (action === 'status') {
-        const currentData = db[botNumber].gmsg;
-        let statusMenu = `*ＧＲＥＥＴＩＮＧ  ＣＵＲＲＥＮＴ  ＳＴＡＴＵＳ*\n\n`;
-        statusMenu += `• *Type:* ${currentData.type.toUpperCase()}\n`;
-        if (currentData.type === 'text') {
-            statusMenu += `• *Message:* ${currentData.content}\n`;
-        } else {
-            statusMenu += `• *File Path:* ${currentData.content}\n`;
-            statusMenu += `• *Caption:* ${currentData.caption || 'None'}\n`;
-            if (currentData.isGif) statusMenu += `• *Playback:* GIF Loop\n`;
-        }
-        return await SYHaTeReplay(statusMenu);
-    }
-}
-
 function cleanupFiles(filePaths) {
     filePaths.forEach(fp => {
         if (fs.existsSync(fp)) {
