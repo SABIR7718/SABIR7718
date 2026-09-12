@@ -14,8 +14,9 @@ S7_BOLD="\033[1m"
 if ! command -v node >/dev/null 2>&1; then
     printf "${S7_YELLOW}[!] Node.js not found${S7_RESET}\n"
     printf "${S7_BLUE}[*] Installing Node.js...${S7_RESET}\n"
-
-    pkg install nodejs npm -y
+    
+    pkg update -y
+    pkg install nodejs npm git -y
 
     if ! command -v node >/dev/null 2>&1; then
         printf "${S7_RED}[✗] Node.js installation failed${S7_RESET}\n"
@@ -101,3 +102,15 @@ if [ "$S7_EXIT_CODE" -eq 0 ]; then
 else
     printf "${S7_RED}${S7_BOLD}[✗] WS Server exited with code: $S7_EXIT_CODE${S7_RESET}\n"
 fi
+
+yarn install v1.22.22
+info No lockfile found.
+[1/5] Validating package.json...
+[2/5] Resolving packages...
+warning @whiskeysockets/baileys@7.0.0-rc.9: This version is affected by a zero-day vulnerability that allows spoofing of messages, please update to
+  the latest versions (6.7.22^ or 7.0.0-rc12^)! For more information, check out the public advisory at
+  https://github.com/WhiskeySockets/Baileys/security/advisories/GHSA-qvv5-jq5g-4cgg
+error Couldn't find the binary git
+info Visit https://yarnpkg.com/en/docs/cli/install for documentation about this command.
+[✗] Dependency installation failed
+~ $
