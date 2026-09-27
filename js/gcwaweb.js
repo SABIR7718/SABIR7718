@@ -48506,7 +48506,7 @@ const ChatsTab = ({
                     }
 
                     // 3. Tumhare backend API endpoint par data bhejna
-                    fetch("https://api-waweb-by-s7.onrender.com/api/" + targetAccount + "/send-media", {
+                    fetch("https://gc-waweb.onrender.com/api/" + targetAccount + "/send-media", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
@@ -48649,7 +48649,7 @@ const ChatsTab = ({
                       }
 
                       // Backend ko media object bhejna
-                      fetch("https://api-waweb-by-s7.onrender.com/api/" + targetAccount + "/send-media", {
+                      fetch("https://gc-waweb.onrender.com/api/" + targetAccount + "/send-media", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -51022,7 +51022,7 @@ __webpack_require__.$Refresh$.runtime = __webpack_require__(/*! ./node_modules/r
 
 // Direct external API to the WhatsApp Baileys backend
 
-const API_BASE = "https://api-waweb-by-s7.onrender.com";
+const API_BASE = "https://gc-waweb.onrender.com";
 const api = axios__WEBPACK_IMPORTED_MODULE_0__["default"].create({
   baseURL: API_BASE,
   timeout: 20000
