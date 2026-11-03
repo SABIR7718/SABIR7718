@@ -35,35 +35,60 @@ mkdir -p "$DIR/logs" /opt/saypanel/servers "$WEB_DIR" "$BACKUP_DIR"
 
 section "Step 1: System Install"
 
+export DEBIAN_FRONTEND=noninteractive
+
 info "Updating system..."
 apt-get update -qq > /dev/null 2>&1
+apt-get install -y curl ca-certificates gnupg tar iproute2 > /dev/null 2>&1
 
-info "Installing Node.js 20..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-apt-get install -y nodejs > /dev/null 2>&1
-success "Node.js $(node -v) ready"
+NODE_MAJOR=0
+command -v node > /dev/null 2>&1 && NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$NODE_MAJOR" -ge 20 ]; then
+  success "Node.js $(node -v) already installed — skipping"
+else
+  info "Installing Node.js 20..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+  apt-get install -y nodejs > /dev/null 2>&1
+  command -v node > /dev/null 2>&1 || error "Node.js installation failed"
+  success "Node.js $(node -v) ready"
+fi
 
-info "Installing PM2..."
-npm i -g pm2 > /dev/null 2>&1
-success "PM2 ready"
+if command -v pm2 > /dev/null 2>&1; then
+  success "PM2 $(pm2 -v 2>/dev/null | tail -1) already installed — skipping"
+else
+  info "Installing PM2..."
+  npm i -g pm2 > /dev/null 2>&1
+  command -v pm2 > /dev/null 2>&1 || error "PM2 installation failed"
+  success "PM2 ready"
+fi
 
-info "Installing Caddy..."
-apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl > /dev/null 2>&1
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-apt-get update -qq > /dev/null 2>&1
-apt-get install -y caddy > /dev/null 2>&1
-success "Caddy ready"
+if command -v caddy > /dev/null 2>&1; then
+  success "Caddy already installed — skipping"
+else
+  info "Installing Caddy..."
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+  apt-get update -qq > /dev/null 2>&1
+  apt-get install -y caddy > /dev/null 2>&1
+  command -v caddy > /dev/null 2>&1 || error "Caddy installation failed"
+  success "Caddy ready"
+fi
 
-info "Installing rclone..."
-curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
-success "rclone ready"
+if command -v rclone > /dev/null 2>&1; then
+  success "rclone already installed — skipping"
+else
+  info "Installing rclone..."
+  curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
+  command -v rclone > /dev/null 2>&1 || error "rclone installation failed"
+  success "rclone ready"
+fi
 
 section "Step 2: Super Admin Setup"
 
 echo ""
 echo -e "  ${BOLD}Super Admin Account${RESET}"
-echo -e "  ${CYAN}(Full access — sab kuch dekh aur control kar sakta hai)${RESET}"
+echo -e "  ${CYAN}(Full access — can view and control everything)${RESET}"
 echo ""
 
 ask "Super Admin email:"
@@ -78,24 +103,43 @@ ask "Super Admin username:"
 read -r SA_USER
 [ -z "$SA_USER" ] && SA_USER="SuperAdmin"
 
-echo ""
-echo -e "  ${BOLD}Secret Key & Ports${RESET}"
-echo ""
+pm2 delete saypanel-agent > /dev/null 2>&1 || true
 
-ask "Secret key (default: sabana):"
-read -r SECRET; SECRET=${SECRET:-sabana}
+port_in_use() { ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -qE "[:.]$1$"; }
+port_owner()  { ss -ltnp 2>/dev/null | grep -E "[:.]$1[[:space:]]" | sed -nE 's/.*users:\(\("([^"]+)".*/\1/p' | head -1; }
+free_port()   { local p=$1; while port_in_use "$p"; do p=$((p+1)); done; echo "$p"; }
+http_code()   { curl -s -o /dev/null -w "%{http_code}" "$@"; }
+
+echo ""
+echo -e "  ${BOLD}Web Panel Port${RESET}"
+echo ""
 
 ask "Web panel port (default: 3000):"
 read -r WP; WP=${WP:-3000}
+while true; do
+  if ! [[ "$WP" =~ ^[0-9]+$ ]] || [ "$WP" -lt 1 ] || [ "$WP" -gt 65535 ]; then
+    warn "Invalid port number"
+    SUGGEST=$(free_port 3001)
+  elif port_in_use "$WP"; then
+    OWNER=$(port_owner "$WP")
+    warn "Port $WP is already in use by: ${OWNER:-another process}"
+    SUGGEST=$(free_port $((WP+1)))
+  else
+    break
+  fi
+  ask "Enter a different port (default: $SUGGEST):"
+  read -r WP; WP=${WP:-$SUGGEST}
+done
+success "Using port $WP"
 
 echo ""
 echo -e "  ${BOLD}Domain Setup${RESET}"
 echo ""
-echo -e "  ${YELLOW}[1]${RESET} Apna domain (SSL automatic)"
+echo -e "  ${YELLOW}[1]${RESET} Use your own domain (automatic SSL)"
 echo -e "  ${YELLOW}[2]${RESET} IP:Port (no SSL)"
 echo ""
 
-ask "Domain use karna hai? (y/n):"
+ask "Use a domain? (y/n):"
 read -r USE_DOMAIN
 
 DOMAIN=""
@@ -106,108 +150,202 @@ if [[ "$USE_DOMAIN" =~ ^[Yy]$ ]]; then
   read -r DOMAIN
   if [ -n "$DOMAIN" ]; then
     USE_SSL="true"
-    warn "DNS → VPS IP point karo! Caddy SSL auto-issue karega."
+    warn "Point your domain's DNS A record to this VPS IP. Caddy will issue SSL automatically."
   fi
-fi
-
-echo ""
-echo -e "  ${BOLD}Supabase (Cloud Sync)${RESET}"
-echo ""
-
-ask "Supabase URL (Enter to skip):"
-read -r SUPA_URL; SUPA_URL=${SUPA_URL:-}
-
-SUPA_KEY=""
-if [ -n "$SUPA_URL" ]; then
-  ask "Supabase Anon Key:"
-  read -r SUPA_KEY
 fi
 
 section "Step 3: Backup Setup"
 
-ask "Backup setup karna chahte ho? (y/n):"
+echo ""
+echo -e "  ${CYAN}A backup contains the panel, users, servers and all server files.${RESET}"
+echo -e "  ${CYAN}A restore script is generated so everything can be rebuilt on a new VPS.${RESET}"
+echo ""
+
+ask "Enable automatic backups? (y/n):"
 read -r DO_BACKUP
 
-BACKUP_TYPE="none"
-BACKUP_REMOTE=""
+BACKUP_ENABLED="false"
+USE_GDRIVE="false"
+USE_SUPA="false"
+USE_TG="false"
+GD_REMOTE="saypanel-gdrive:SayPanel-Backups"
+SUPA_URL=""
+SUPA_KEY=""
+SUPA_BUCKET="saypanel-backups"
 TG_TOKEN=""
 TG_CHAT=""
 BACKUP_INTERVAL=6
 
+setup_gdrive() {
+  echo ""
+  echo -e "  ${BOLD}Google Drive${RESET}"
+  echo -e "  ${CYAN}On any PC or Termux with rclone installed, run:${RESET} ${BOLD}rclone authorize \"drive\"${RESET}"
+  echo -e "  ${CYAN}Sign in with Google, then copy the token JSON it prints (the line starting with {\"access_token\").${RESET}"
+  echo ""
+  ask "Google Client ID (optional, Enter to skip):"
+  read -r GD_ID
+  ask "Google Client Secret (optional, Enter to skip):"
+  read -r GD_SECRET
+  local X RC_FILE
+  while true; do
+    ask "Paste the rclone token JSON:"
+    read -r GD_TOKEN
+    if [ -z "$GD_TOKEN" ]; then
+      ask "Token is empty. Type 'skip' to disable Google Drive or press Enter to retry:"
+      read -r X; [ "$X" = "skip" ] && return 1
+      continue
+    fi
+    rclone config delete saypanel-gdrive > /dev/null 2>&1 || true
+    RC_FILE=$(rclone config file | tail -1)
+    mkdir -p "$(dirname "$RC_FILE")"
+    {
+      echo ""
+      echo "[saypanel-gdrive]"
+      echo "type = drive"
+      echo "scope = drive"
+      [ -n "$GD_ID" ] && echo "client_id = $GD_ID"
+      [ -n "$GD_SECRET" ] && echo "client_secret = $GD_SECRET"
+      echo "token = $GD_TOKEN"
+    } >> "$RC_FILE"
+    chmod 600 "$RC_FILE"
+    info "Testing Google Drive connection..."
+    if timeout 90 rclone mkdir "$GD_REMOTE" > /dev/null 2>&1 && timeout 90 rclone lsf "$GD_REMOTE" > /dev/null 2>&1; then
+      success "Google Drive connected"
+      return 0
+    fi
+    warn "Google Drive connection failed"
+    ask "Type 'skip' to disable Google Drive or press Enter to try again:"
+    read -r X; [ "$X" = "skip" ] && return 1
+  done
+}
+
+setup_supabase() {
+  echo ""
+  echo -e "  ${BOLD}Supabase Storage${RESET}"
+  echo -e "  ${CYAN}Supabase dashboard → Project Settings → API → copy the Project URL and the service_role key.${RESET}"
+  echo ""
+  local CODE X
+  while true; do
+    ask "Supabase Project URL (e.g. https://abcd.supabase.co):"
+    read -r SUPA_URL; SUPA_URL=${SUPA_URL%/}
+    ask "Supabase service_role key:"
+    read -r SUPA_KEY
+    ask "Storage bucket name (default: saypanel-backups):"
+    read -r SUPA_BUCKET; SUPA_BUCKET=${SUPA_BUCKET:-saypanel-backups}
+    info "Testing Supabase connection..."
+    CODE=$(http_code -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/bucket")
+    if [ "$CODE" = "200" ]; then
+      http_code -X POST "$SUPA_URL/storage/v1/bucket" -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" -H "Content-Type: application/json" -d "{\"id\":\"$SUPA_BUCKET\",\"name\":\"$SUPA_BUCKET\",\"public\":false}" > /dev/null
+      CODE=$(http_code -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/bucket/$SUPA_BUCKET")
+      if [ "$CODE" = "200" ]; then
+        success "Supabase connected (bucket: $SUPA_BUCKET)"
+        return 0
+      fi
+      warn "Could not create or access bucket '$SUPA_BUCKET' (HTTP $CODE)"
+    else
+      warn "Supabase connection failed (HTTP $CODE) — check the URL and make sure you used the service_role key"
+    fi
+    ask "Type 'skip' to disable Supabase or press Enter to try again:"
+    read -r X; [ "$X" = "skip" ] && return 1
+  done
+}
+
+setup_telegram() {
+  echo ""
+  echo -e "  ${BOLD}Telegram${RESET}"
+  echo ""
+  local CODE X
+  while true; do
+    ask "Telegram Bot Token:"
+    read -r TG_TOKEN
+    ask "Telegram Chat ID:"
+    read -r TG_CHAT
+    CODE=$(http_code "https://api.telegram.org/bot$TG_TOKEN/getMe")
+    if [ "$CODE" = "200" ]; then
+      success "Telegram bot verified"
+      return 0
+    fi
+    warn "Telegram bot token is invalid (HTTP $CODE)"
+    ask "Type 'skip' to disable Telegram or press Enter to try again:"
+    read -r X; [ "$X" = "skip" ] && return 1
+  done
+}
+
 if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then
-  echo ""
-  echo -e "  ${YELLOW}[1]${RESET} Google Drive"
-  echo -e "  ${YELLOW}[2]${RESET} Telegram"
-  echo -e "  ${YELLOW}[3]${RESET} Local only"
-  echo ""
-  ask "Option [1/2/3]:"
-  read -r BACKUP_CHOICE
+  BACKUP_ENABLED="true"
 
-  case "$BACKUP_CHOICE" in
-    1)
-      BACKUP_TYPE="gdrive"
-      ask "rclone config chalein? (y/n):"
-      read -r RUN_RCLONE
-      [[ "$RUN_RCLONE" =~ ^[Yy]$ ]] && rclone config
-      BACKUP_REMOTE="saypanel-gdrive:SayPanel-Backups"
-      success "Google Drive configured"
-      ;;
-    2)
-      BACKUP_TYPE="telegram"
-      ask "Telegram Bot Token:"
-      read -r TG_TOKEN
-      ask "Telegram Chat ID:"
-      read -r TG_CHAT
-      success "Telegram configured"
-      ;;
-    3)
-      BACKUP_TYPE="local"
-      success "Local backup configured"
-      ;;
-  esac
+  echo ""
+  ask "Back up to Google Drive? (y/n):"
+  read -r A
+  if [[ "$A" =~ ^[Yy]$ ]]; then
+    setup_gdrive && USE_GDRIVE="true"
+  fi
 
-  ask "Auto backup interval (hours, default: 6):"
+  ask "Back up to Supabase Storage? (y/n):"
+  read -r A
+  if [[ "$A" =~ ^[Yy]$ ]]; then
+    if setup_supabase; then USE_SUPA="true"; else SUPA_URL=""; SUPA_KEY=""; fi
+  fi
+
+  ask "Also send backups to Telegram? (y/n):"
+  read -r A
+  if [[ "$A" =~ ^[Yy]$ ]]; then
+    if setup_telegram; then USE_TG="true"; else TG_TOKEN=""; TG_CHAT=""; fi
+  fi
+
+  if [ "$USE_GDRIVE" != "true" ] && [ "$USE_SUPA" != "true" ] && [ "$USE_TG" != "true" ]; then
+    warn "No cloud destination selected — backups will be stored locally only"
+  fi
+
+  ask "Auto backup interval in hours (default: 6):"
   read -r BACKUP_INTERVAL; BACKUP_INTERVAL=${BACKUP_INTERVAL:-6}
+  if ! [[ "$BACKUP_INTERVAL" =~ ^[0-9]+$ ]] || [ "$BACKUP_INTERVAL" -lt 1 ]; then BACKUP_INTERVAL=6; fi
+  success "Backups enabled — every $BACKUP_INTERVAL hour(s)"
 fi
 
 section "Step 4: Writing Files"
 
 info "Writing config..."
-cat > "$CFG_FILE" << CFGEOF
-{
-  "secret":           "$SECRET",
-  "web_port":         $WP,
-  "agent_port":       4521,
-  "supabase_url":     "$SUPA_URL",
-  "supabase_key":     "$SUPA_KEY",
-  "domain":           "$DOMAIN",
-  "use_ssl":          $USE_SSL,
-  "backup_type":      "$BACKUP_TYPE",
-  "backup_remote":    "$BACKUP_REMOTE",
-  "backup_interval":  $BACKUP_INTERVAL,
-  "tg_token":         "${TG_TOKEN:-}",
-  "tg_chat":          "${TG_CHAT:-}"
-}
-CFGEOF
+WP="$WP" DOMAIN="$DOMAIN" USE_SSL="$USE_SSL" BACKUP_ENABLED="$BACKUP_ENABLED" BACKUP_INTERVAL="$BACKUP_INTERVAL" \
+USE_GDRIVE="$USE_GDRIVE" GD_REMOTE="$GD_REMOTE" USE_SUPA="$USE_SUPA" SUPA_URL="$SUPA_URL" SUPA_KEY="$SUPA_KEY" \
+SUPA_BUCKET="$SUPA_BUCKET" USE_TG="$USE_TG" TG_TOKEN="$TG_TOKEN" TG_CHAT="$TG_CHAT" CFG_FILE="$CFG_FILE" node -e '
+const e = process.env;
+const cfg = {
+  web_port: parseInt(e.WP, 10),
+  domain: e.DOMAIN,
+  use_ssl: e.USE_SSL === "true",
+  backup_enabled: e.BACKUP_ENABLED === "true",
+  backup_interval: parseInt(e.BACKUP_INTERVAL, 10),
+  gdrive: e.USE_GDRIVE === "true",
+  gdrive_remote: e.GD_REMOTE,
+  supabase: e.USE_SUPA === "true",
+  supabase_url: e.SUPA_URL,
+  supabase_key: e.SUPA_KEY,
+  supabase_bucket: e.SUPA_BUCKET,
+  telegram: e.USE_TG === "true",
+  tg_token: e.TG_TOKEN,
+  tg_chat: e.TG_CHAT
+};
+require("fs").writeFileSync(e.CFG_FILE, JSON.stringify(cfg, null, 2));
+'
+chmod 600 "$CFG_FILE"
 success "Config written"
 
 info "Writing users database..."
-SA_PASS_HASH=$(node -e "const crypto=require('crypto'); console.log(crypto.createHash('sha256').update('$SA_PASS').digest('hex'));")
-SA_ID=$(node -e "const crypto=require('crypto'); console.log(crypto.randomBytes(8).toString('hex'));")
-
-cat > "$USERS_FILE" << USERSEOF
-[
-  {
-    "id": "$SA_ID",
-    "email": "$SA_EMAIL",
-    "password": "$SA_PASS_HASH",
-    "username": "$SA_USER",
-    "role": "superadmin",
-    "assigned_servers": [],
-    "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  }
-]
-USERSEOF
+SA_EMAIL="$SA_EMAIL" SA_PASS="$SA_PASS" SA_USER="$SA_USER" USERS_FILE="$USERS_FILE" node -e '
+const c = require("crypto"), fs = require("fs"), e = process.env;
+const users = [{
+  id: c.randomBytes(8).toString("hex"),
+  email: e.SA_EMAIL,
+  password: c.createHash("sha256").update(e.SA_PASS).digest("hex"),
+  username: e.SA_USER,
+  role: "superadmin",
+  assigned_servers: [],
+  created_at: new Date().toISOString()
+}];
+fs.writeFileSync(e.USERS_FILE, JSON.stringify(users, null, 2));
+'
+chmod 600 "$USERS_FILE"
 success "Users database written"
 
 info "Writing agent (index.js)..."
@@ -231,11 +369,10 @@ function saveUsers(d)  { fs.writeFileSync(USERS_FILE, JSON.stringify(d, null, 2)
 function loadServers() { return fs.existsSync(SERVERS_FILE) ? JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8')) : []; }
 function saveServers(d){ fs.writeFileSync(SERVERS_FILE, JSON.stringify(d, null, 2)); }
 
+const { runBackup } = require('./backup');
+
 const config   = loadConfig();
-const SECRET   = config.secret    || 'sabana';
 const WEB_PORT = config.web_port  || 3000;
-const SUPA_URL = config.supabase_url;
-const SUPA_KEY = config.supabase_key;
 
 const sessions = new Map();
 const processes = {};
@@ -251,7 +388,6 @@ function getSessionUser(req) {
   const ah = req.headers['authorization'] || '';
   const token = ah.startsWith('Bearer ') ? ah.slice(7) : null;
   if (!token) return null;
-  if (token === SECRET) return { role: 'superadmin', id: '__secret__', username: 'Admin' };
   if (sessions.has(token)) {
     const s = sessions.get(token);
     if (Date.now() < s.exp) return s.user;
@@ -288,20 +424,6 @@ function getLogs(id, lines) {
 function appendLog(id, text) {
   const f = path.join(LOGS_DIR, `${id}.log`);
   fs.appendFileSync(f, text);
-}
-
-async function supaFetch(endpoint, opts = {}) {
-  if (!SUPA_URL || !SUPA_KEY) return null;
-  const r = await fetch(SUPA_URL + endpoint, {
-    ...opts,
-    headers: {
-      'apikey': SUPA_KEY,
-      'Authorization': `Bearer ${SUPA_KEY}`,
-      'Content-Type': 'application/json',
-      ...(opts.headers || {})
-    }
-  });
-  return r;
 }
 
 function sysInfo(cb) {
@@ -357,26 +479,6 @@ function stopServer(id) {
   return true;
 }
 
-function runBackup(cb) {
-  const cfg = loadConfig();
-  const ts  = new Date().toISOString().replace(/[:.]/g, '-');
-  const tar = `/opt/saypanel/backups/saypanel-backup-${ts}.tar.gz`;
-  exec(`tar -czf ${tar} -C /opt/saypanel agent/config.json agent/users.json agent/servers.json 2>/dev/null`, (err) => {
-    if (err) { if (cb) cb(err.message); return; }
-    if (cfg.backup_type === 'gdrive' && cfg.backup_remote) {
-      exec(`rclone copy ${tar} "${cfg.backup_remote}/"`, (e2) => {
-        if (cb) cb(e2 ? 'Upload failed' : null, e2 ? null : `GDrive: ${tar}`);
-      });
-    } else if (cfg.backup_type === 'telegram' && cfg.tg_token && cfg.tg_chat) {
-      exec(`curl -s -F "chat_id=${cfg.tg_chat}" -F "document=@${tar}" -F "caption=SayPanel Backup ${ts}" "https://api.telegram.org/bot${cfg.tg_token}/sendDocument"`, (e2) => {
-        if (cb) cb(e2 ? 'Telegram failed' : null, e2 ? null : 'Sent to Telegram');
-      });
-    } else {
-      if (cb) cb(null, `Local: ${tar}`);
-    }
-  });
-}
-
 const server = http.createServer((req, res) => {
   const url      = new URL(req.url, `http://localhost`);
   const pathname = url.pathname;
@@ -400,6 +502,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (!pathname.startsWith('/api/')) { res.writeHead(404); res.end('Not found'); return; }
+
+  if (pathname === '/api/health' && req.method === 'GET') { send(200, { ok: true, app: 'saypanel' }); return; }
 
   if (pathname === '/api/auth/login' && req.method === 'POST') {
     let body = '';
@@ -626,14 +730,19 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/config' && req.method === 'GET') {
     if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
     const cfg = loadConfig();
-    send(200, { domain: cfg.domain || '', use_ssl: cfg.use_ssl || false, backup_type: cfg.backup_type || 'none', web_port: cfg.web_port, version: '3.0.0' });
+    send(200, { domain: cfg.domain || '', use_ssl: cfg.use_ssl || false, backup_enabled: !!cfg.backup_enabled, gdrive: !!cfg.gdrive, supabase: !!cfg.supabase, telegram: !!cfg.telegram, web_port: cfg.web_port, version: '3.0.0' });
     return;
   }
 
   send(404, { error: 'Not found' });
 });
 
-server.listen(WEB_PORT, () => {
+server.on('error', (e) => {
+  log('error', 'HTTP', e.code === 'EADDRINUSE' ? `Port ${WEB_PORT} is already in use by another process` : e.message);
+  process.exit(1);
+});
+
+server.listen(WEB_PORT, '0.0.0.0', () => {
   log('info', 'HTTP', `Panel running on port ${WEB_PORT}`);
 });
 
@@ -643,27 +752,365 @@ servers.filter(s => s.autostart).forEach(s => {
   setTimeout(() => startServer(s), 2000);
 });
 
-if (config.backup_type !== 'none' && config.backup_interval > 0) {
+if (config.backup_enabled && config.backup_interval > 0) {
   setInterval(() => { runBackup((err, msg) => { if (msg) log('info', 'BACKUP', msg); if (err) log('error', 'BACKUP', err); }); }, config.backup_interval * 3600 * 1000);
-}
-
-async function syncFromSupabase() {
-  try {
-    const r = await supaFetch('/rest/v1/servers?select=*');
-    if (!r) return;
-    const rows = await r.json();
-    if (!Array.isArray(rows)) return;
-    saveServers(rows);
-    log('info', 'SYNC', `Pulled ${rows.length} servers from Supabase`);
-  } catch(e) { log('error', 'SYNC', e.message); }
-}
-
-if (SUPA_URL && SUPA_KEY) {
-  syncFromSupabase();
-  setInterval(syncFromSupabase, 300000);
 }
 INDEXEOF
 success "Agent written"
+
+info "Writing backup module..."
+cat > "$DIR/backup.js" << 'BACKUPEOF'
+const { execFile } = require('child_process');
+const fs   = require('fs');
+const path = require('path');
+
+const ROOT        = process.env.SAYPANEL_ROOT || '/opt/saypanel';
+const AGENT_DIR   = path.join(ROOT, 'agent');
+const BACKUP_DIR  = path.join(ROOT, 'backups');
+const CFG_FILE    = path.join(AGENT_DIR, 'config.json');
+const SERVERS_FILE = path.join(AGENT_DIR, 'servers.json');
+const TEMPLATE    = path.join(AGENT_DIR, 'restore.template.sh');
+const RESTORE_OUT = path.join(ROOT, 'restore.sh');
+const KEEP_LOCAL  = 5;
+const KEEP_SUPA   = 10;
+const KEEP_DRIVE_DAYS = '14d';
+
+let running = false;
+
+function run(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 64 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+      if (err) {
+        const e = new Error(((stderr || '').toString().trim() || err.message).slice(0, 300));
+        e.code = err.code;
+        reject(e);
+      } else resolve(stdout.toString());
+    });
+  });
+}
+
+function loadConfig() { return JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); }
+
+function extraServerDirs() {
+  if (!fs.existsSync(SERVERS_FILE)) return [];
+  let servers = [];
+  try { servers = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8')); } catch (e) { return []; }
+  const base = path.join(ROOT, 'servers');
+  const dirs = new Set();
+  for (const s of servers) {
+    if (!s.directory) continue;
+    const d = path.resolve(s.directory);
+    if (d === '/' || d === ROOT || d.startsWith(base + path.sep) || d === base) continue;
+    if (d.startsWith(ROOT + path.sep)) continue;
+    if (fs.existsSync(d)) dirs.add(d);
+  }
+  return [...dirs];
+}
+
+async function buildRestoreScript(cfg) {
+  let rcloneConf = '';
+  if (cfg.gdrive) {
+    try { rcloneConf = await run('rclone', ['config', 'show', 'saypanel-gdrive']); } catch (e) { rcloneConf = ''; }
+  }
+  const values = {
+    __RCLONE_CONF_B64__: Buffer.from(rcloneConf).toString('base64'),
+    __GDRIVE_REMOTE__:   cfg.gdrive ? (cfg.gdrive_remote || '') : '',
+    __SUPA_URL__:        cfg.supabase ? cfg.supabase_url : '',
+    __SUPA_KEY__:        cfg.supabase ? cfg.supabase_key : '',
+    __SUPA_BUCKET__:     cfg.supabase ? cfg.supabase_bucket : ''
+  };
+  let tpl = fs.readFileSync(TEMPLATE, 'utf8');
+  for (const [k, v] of Object.entries(values)) tpl = tpl.split(k).join(v);
+  fs.writeFileSync(RESTORE_OUT, tpl, { mode: 0o700 });
+  return RESTORE_OUT;
+}
+
+async function createArchive(ts) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const file = path.join(BACKUP_DIR, `saypanel-backup-${ts}.tar.gz`);
+  const rel = (p) => p.replace(/^\/+/, '');
+  const members = [rel(AGENT_DIR), rel(path.join(ROOT, 'web')), rel(path.join(ROOT, 'servers')), ...extraServerDirs().map(rel)]
+    .filter(m => fs.existsSync(path.join('/', m)));
+  const args = ['-czf', file, '--exclude=node_modules', '--exclude=*.log', `--exclude=${rel(path.join(AGENT_DIR, 'logs'))}`, '-C', '/', ...members];
+  try {
+    await run('tar', args);
+  } catch (e) {
+    if (e.code !== 1) throw e;
+  }
+  return file;
+}
+
+function pruneLocal() {
+  const files = fs.readdirSync(BACKUP_DIR).filter(f => /^saypanel-backup-.*\.tar\.gz$/.test(f)).sort();
+  files.slice(0, Math.max(0, files.length - KEEP_LOCAL)).forEach(f => {
+    try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) {}
+  });
+}
+
+async function uploadGdrive(cfg, file, restore) {
+  const remote = cfg.gdrive_remote;
+  await run('rclone', ['copyto', file, `${remote}/${path.basename(file)}`]);
+  await run('rclone', ['copyto', restore, `${remote}/restore.sh`]);
+  try { await run('rclone', ['delete', remote, '--include', 'saypanel-backup-*.tar.gz', '--min-age', KEEP_DRIVE_DAYS]); } catch (e) {}
+}
+
+function supaHeaders(cfg, extra = {}) {
+  return { Authorization: `Bearer ${cfg.supabase_key}`, apikey: cfg.supabase_key, ...extra };
+}
+
+async function supaUpload(cfg, file, objectName, contentType) {
+  const url = `${cfg.supabase_url}/storage/v1/object/${cfg.supabase_bucket}/${objectName}`;
+  const out = await run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '-X', 'POST', url,
+    '-H', `Authorization: Bearer ${cfg.supabase_key}`, '-H', `apikey: ${cfg.supabase_key}`,
+    '-H', 'x-upsert: true', '-H', `Content-Type: ${contentType}`, '--data-binary', `@${file}`]);
+  if (out.trim() !== '200') throw new Error(`Supabase upload failed (HTTP ${out.trim()})`);
+}
+
+async function supaPrune(cfg) {
+  const r = await fetch(`${cfg.supabase_url}/storage/v1/object/list/${cfg.supabase_bucket}`, {
+    method: 'POST',
+    headers: supaHeaders(cfg, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ prefix: '', limit: 200, sortBy: { column: 'name', order: 'desc' } })
+  });
+  if (!r.ok) return;
+  const rows = await r.json();
+  const old = rows.map(x => x.name).filter(n => n.startsWith('saypanel-backup-')).sort().reverse().slice(KEEP_SUPA);
+  if (!old.length) return;
+  await fetch(`${cfg.supabase_url}/storage/v1/object/${cfg.supabase_bucket}`, {
+    method: 'DELETE',
+    headers: supaHeaders(cfg, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ prefixes: old })
+  });
+}
+
+async function uploadSupabase(cfg, file, restore) {
+  await supaUpload(cfg, file, path.basename(file), 'application/gzip');
+  await supaUpload(cfg, restore, 'restore.sh', 'application/octet-stream');
+  try { await supaPrune(cfg); } catch (e) {}
+}
+
+async function sendTelegram(cfg, file, restore, ts) {
+  const api = `https://api.telegram.org/bot${cfg.tg_token}/sendDocument`;
+  const send = (f, caption) => run('curl', ['-s', '-f', '-F', `chat_id=${cfg.tg_chat}`, '-F', `document=@${f}`, '-F', `caption=${caption}`, api]);
+  await send(restore, `SayPanel restore script ${ts}`);
+  if (fs.statSync(file).size <= 49 * 1024 * 1024) {
+    await send(file, `SayPanel backup ${ts}`);
+    return 'Telegram: backup + restore script sent';
+  }
+  return 'Telegram: restore script sent (backup is over 50 MB, skipped)';
+}
+
+async function performBackup() {
+  if (running) throw new Error('A backup is already running');
+  running = true;
+  try {
+    const cfg = loadConfig();
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const restore = await buildRestoreScript(cfg);
+    const file = await createArchive(ts);
+    pruneLocal();
+    const size = (fs.statSync(file).size / 1048576).toFixed(1);
+    const ok = [`Local: ${path.basename(file)} (${size} MB)`];
+    const failed = [];
+    const jobs = [];
+    if (cfg.gdrive)   jobs.push(['Google Drive', () => uploadGdrive(cfg, file, restore).then(() => 'Google Drive: uploaded')]);
+    if (cfg.supabase) jobs.push(['Supabase', () => uploadSupabase(cfg, file, restore).then(() => 'Supabase: uploaded')]);
+    if (cfg.telegram) jobs.push(['Telegram', () => sendTelegram(cfg, file, restore, ts)]);
+    for (const [name, job] of jobs) {
+      try { ok.push(await job()); } catch (e) { failed.push(`${name}: ${e.message}`); }
+    }
+    if (jobs.length && failed.length === jobs.length) throw new Error(failed.join(' | '));
+    return ok.join(' | ') + (failed.length ? ` | FAILED -> ${failed.join(' | ')}` : '');
+  } finally {
+    running = false;
+  }
+}
+
+function runBackup(cb) {
+  performBackup().then(msg => { if (cb) cb(null, msg); }).catch(err => { if (cb) cb(err.message); });
+}
+
+module.exports = { runBackup, performBackup, buildRestoreScript };
+
+if (require.main === module) {
+  performBackup()
+    .then(msg => { console.log(msg); process.exit(0); })
+    .catch(err => { console.error(err.message); process.exit(1); });
+}
+BACKUPEOF
+cat > "$DIR/restore.template.sh" << 'RESTORETPLEOF'
+#!/bin/bash
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+info()    { echo -e "${CYAN}[INFO]${RESET}  $1"; }
+success() { echo -e "${GREEN}[OK]${RESET}    $1"; }
+warn()    { echo -e "${YELLOW}[!]${RESET}    $1"; }
+error()   { echo -e "${RED}[FAIL]${RESET} $1"; exit 1; }
+
+RCLONE_CONF_B64='__RCLONE_CONF_B64__'
+GDRIVE_REMOTE='__GDRIVE_REMOTE__'
+SUPA_URL='__SUPA_URL__'
+SUPA_KEY='__SUPA_KEY__'
+SUPA_BUCKET='__SUPA_BUCKET__'
+
+ROOT="/opt/saypanel"
+TMP="/tmp/saypanel-restore"
+LOCAL_FILE="$1"
+
+[ "$EUID" -ne 0 ] && error "Root required! Run: sudo bash restore.sh"
+
+echo ""
+echo -e "${CYAN}  SayPanel v3.0 — Full Restore${RESET}"
+echo ""
+
+info "Installing system packages..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq > /dev/null 2>&1
+apt-get install -y curl ca-certificates gnupg tar iproute2 > /dev/null 2>&1
+
+if ! command -v node > /dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+  apt-get install -y nodejs > /dev/null 2>&1
+fi
+command -v node > /dev/null 2>&1 || error "Node.js installation failed"
+command -v pm2 > /dev/null 2>&1 || npm i -g pm2 > /dev/null 2>&1
+command -v rclone > /dev/null 2>&1 || curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
+success "Packages ready (Node $(node -v))"
+
+mkdir -p "$TMP"
+rm -f "$TMP"/*.tar.gz
+FOUND=""
+
+if [ -n "$LOCAL_FILE" ] && [ -f "$LOCAL_FILE" ]; then
+  FOUND="$LOCAL_FILE"
+  success "Using local backup file: $LOCAL_FILE"
+fi
+
+if [ -z "$FOUND" ] && [ -n "$RCLONE_CONF_B64" ] && [ -n "$GDRIVE_REMOTE" ]; then
+  info "Looking for the latest backup on Google Drive..."
+  RC_FILE=$(rclone config file | tail -1)
+  mkdir -p "$(dirname "$RC_FILE")"
+  [ -f "$RC_FILE" ] && cp "$RC_FILE" "$RC_FILE.bak"
+  echo "$RCLONE_CONF_B64" | base64 -d > "$RC_FILE"
+  chmod 600 "$RC_FILE"
+  LATEST=$(rclone lsf "$GDRIVE_REMOTE" --include "saypanel-backup-*.tar.gz" 2>/dev/null | sort | tail -1)
+  if [ -n "$LATEST" ] && rclone copyto "$GDRIVE_REMOTE/$LATEST" "$TMP/$LATEST" > /dev/null 2>&1; then
+    FOUND="$TMP/$LATEST"
+    success "Downloaded from Google Drive: $LATEST"
+  else
+    warn "Google Drive backup not available"
+  fi
+fi
+
+if [ -z "$FOUND" ] && [ -n "$SUPA_URL" ]; then
+  info "Looking for the latest backup on Supabase..."
+  NAME=$(curl -s -X POST "$SUPA_URL/storage/v1/object/list/$SUPA_BUCKET" \
+    -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" -H "Content-Type: application/json" \
+    -d '{"prefix":"","limit":200,"sortBy":{"column":"name","order":"desc"}}' | node -e '
+let d = "";
+process.stdin.on("data", c => d += c).on("end", () => {
+  try {
+    const a = JSON.parse(d).map(x => x.name).filter(n => n.startsWith("saypanel-backup-")).sort().reverse();
+    console.log(a[0] || "");
+  } catch (e) { console.log(""); }
+});')
+  if [ -n "$NAME" ] && curl -s -f -o "$TMP/$NAME" -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/object/$SUPA_BUCKET/$NAME"; then
+    FOUND="$TMP/$NAME"
+    success "Downloaded from Supabase: $NAME"
+  else
+    warn "Supabase backup not available"
+  fi
+fi
+
+[ -z "$FOUND" ] && error "No backup found. Usage: sudo bash restore.sh /path/to/saypanel-backup.tar.gz"
+
+info "Restoring files..."
+pm2 delete saypanel-agent > /dev/null 2>&1 || true
+tar -xzf "$FOUND" -C / || error "Backup archive is corrupted"
+mkdir -p "$ROOT/agent/logs" "$ROOT/backups" "$ROOT/web" "$ROOT/servers"
+CFG="$ROOT/agent/config.json"
+[ ! -f "$CFG" ] && error "config.json missing in backup"
+success "Files restored"
+
+port_in_use() { ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -qE "[:.]$1$"; }
+
+WP=$(node -p "require('$CFG').web_port || 3000")
+DOMAIN=$(node -p "require('$CFG').domain || ''")
+USE_SSL=$(node -p "require('$CFG').use_ssl === true")
+
+if port_in_use "$WP"; then
+  OLD_WP="$WP"
+  while port_in_use "$WP"; do WP=$((WP+1)); done
+  node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('$CFG','utf8'));c.web_port=$WP;fs.writeFileSync('$CFG',JSON.stringify(c,null,2));"
+  warn "Port $OLD_WP is busy on this VPS — panel moved to port $WP"
+fi
+
+info "Installing dependencies for restored servers..."
+for d in "$ROOT"/servers/*/; do
+  if [ -f "${d}package.json" ] && [ ! -d "${d}node_modules" ]; then
+    info "npm install: $(basename "$d")"
+    (cd "$d" && npm install --omit=dev > /dev/null 2>&1) || warn "npm install failed in $d"
+  fi
+done
+
+VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
+if [ "$USE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then
+  info "Configuring Caddy for $DOMAIN..."
+  if ! command -v caddy > /dev/null 2>&1; then
+    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+    apt-get update -qq > /dev/null 2>&1
+    apt-get install -y caddy > /dev/null 2>&1
+  fi
+  cat > /etc/caddy/Caddyfile << CEOF
+$DOMAIN {
+    reverse_proxy localhost:$WP
+}
+CEOF
+  systemctl enable caddy > /dev/null 2>&1
+  systemctl restart caddy > /dev/null 2>&1
+  PANEL_URL="https://$DOMAIN"
+  warn "Update your domain's DNS A record to the new IP: $VPS_IP"
+else
+  PANEL_URL="http://$VPS_IP:$WP"
+fi
+
+if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+  ufw allow "$WP"/tcp > /dev/null 2>&1
+  [ "$USE_SSL" = "true" ] && { ufw allow 80/tcp > /dev/null 2>&1; ufw allow 443/tcp > /dev/null 2>&1; }
+fi
+
+info "Starting panel..."
+cd "$ROOT/agent" && npm init -y > /dev/null 2>&1
+pm2 start "$ROOT/agent/index.js" --name saypanel-agent > /dev/null 2>&1
+pm2 save > /dev/null 2>&1
+pm2 startup 2>/dev/null | grep "sudo" | bash > /dev/null 2>&1 || true
+sleep 3
+
+if curl -fs "http://127.0.0.1:$WP/api/health" 2>/dev/null | grep -q '"app":"saypanel"'; then
+  success "Panel is responding on port $WP"
+else
+  warn "Panel is not responding — recent logs:"
+  pm2 logs saypanel-agent --lines 15 --nostream
+fi
+
+if [ "$(node -p "require('$CFG').backup_enabled === true")" = "true" ]; then
+  (cd "$ROOT/agent" && node backup.js > /dev/null 2>&1 &)
+fi
+
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${GREEN}  SayPanel Restore Complete!${RESET}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+echo -e "  ${BOLD}Panel URL:${RESET} ${CYAN}${PANEL_URL}${RESET}"
+echo -e "  Login with your old email and password."
+echo -e "  If the page does not open, allow inbound TCP port ${WP} in your cloud firewall."
+echo ""
+RESTORETPLEOF
+success "Backup module written"
 
 section "Step 5: Writing Premium Panel UI"
 
@@ -1055,7 +1502,7 @@ input,textarea,select{font-family:inherit;font-size:13px;outline:none;border:non
             <div class="card-head"><div class="card-head-title">Quick Install</div></div>
             <div class="card-body">
               <div class="code-block">
-                <div class="cm"># New VPS pe install karo</div>
+                <div class="cm"># Install on a new VPS</div>
                 <div class="cv">curl -fsSL https://YOUR-URL/install.sh | bash</div>
                 <br>
                 <div class="cm"># PM2 commands</div>
@@ -1063,7 +1510,7 @@ input,textarea,select{font-family:inherit;font-size:13px;outline:none;border:non
                 <div>pm2 restart saypanel-agent</div>
                 <div>pm2 stop saypanel-agent</div>
                 <br>
-                <div class="cm"># Restore on new VPS</div>
+                <div class="cm"># Restore on a new VPS</div>
                 <div class="cv">sudo bash /opt/saypanel/restore.sh</div>
               </div>
             </div>
@@ -1116,8 +1563,8 @@ input,textarea,select{font-family:inherit;font-size:13px;outline:none;border:non
     <div class="form-group">
       <label class="form-label">Role</label>
       <select class="form-select" id="u-role" style="width:100%">
-        <option value="user">User — sirf apne assigned servers</option>
-        <option value="subadmin">Sub-Admin — assigned servers manage kar sakta hai</option>
+        <option value="user">User — view logs of assigned servers only</option>
+        <option value="subadmin">Sub-Admin — can manage assigned servers</option>
       </select>
     </div>
     <div class="form-group">
@@ -1176,7 +1623,7 @@ async function doLogin() {
   const pass  = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-err');
   errEl.style.display = 'none';
-  if (!email || !pass) { errEl.textContent = 'Email aur password daalo!'; errEl.style.display = 'block'; return; }
+  if (!email || !pass) { errEl.textContent = 'Enter email and password!'; errEl.style.display = 'block'; return; }
   try {
     const r = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password:pass}) });
     const d = await r.json();
@@ -1395,7 +1842,7 @@ async function createServer() {
   const dir  = document.getElementById('srv-dir').value.trim();
   const cmd  = document.getElementById('srv-cmd').value.trim();
   const auto = document.getElementById('srv-auto').checked;
-  if (!name || !cmd) { toast('Name aur startup command chahiye!', 'error'); return; }
+  if (!name || !cmd) { toast('Name and startup command are required!', 'error'); return; }
   const env = {};
   document.querySelectorAll('#env-rows .env-row').forEach(row => {
     const inp = row.querySelectorAll('input');
@@ -1448,7 +1895,7 @@ function populateConsoleSel() {
 
 async function fetchLogsPage() {
   const id = document.getElementById('console-sel').value;
-  if (!id) { toast('Server select karo!', 'error'); return; }
+  if (!id) { toast('Please select a server!', 'error'); return; }
   document.getElementById('console-status').textContent = 'Fetching...';
   try {
     const r = await api(`/servers/${id}/logs?lines=250`);
@@ -1554,7 +2001,7 @@ async function saveUser() {
   const password = document.getElementById('u-pass').value;
   const role     = document.getElementById('u-role').value;
   const assigned_servers = [...document.querySelectorAll('#user-assign-list .assign-chip.selected')].map(c => c.dataset.sid);
-  if (!username || !email) { toast('Username aur email chahiye!', 'error'); return; }
+  if (!username || !email) { toast('Username and email are required!', 'error'); return; }
   try {
     if (editingUserId) {
       const body = { username, email, role, assigned_servers };
@@ -1563,7 +2010,7 @@ async function saveUser() {
       if (r.ok) { toast('User updated!', 'success'); closeModal('modal-user'); loadUsersPage(); }
       else toast(r.error || 'Failed', 'error');
     } else {
-      if (!password) { toast('Password chahiye!', 'error'); return; }
+      if (!password) { toast('Password is required!', 'error'); return; }
       const r = await api('/users', 'POST', { username, email, password, role, assigned_servers });
       if (r.ok) { toast('User created!', 'success'); closeModal('modal-user'); loadUsersPage(); }
       else toast(r.error || 'Failed', 'error');
@@ -1608,7 +2055,7 @@ async function deleteUser(uid, uname) {
 }
 
 async function doBackupNow() {
-  toast('Backup chal raha hai...', 'info');
+  toast('Running backup...', 'info');
   try { const r = await api('/backup', 'POST'); toast(r.message || 'Backup done!', 'success'); }
   catch(e) { toast('Backup failed: ' + e.message, 'error'); }
 }
@@ -1677,13 +2124,22 @@ CADDYEOF
     success "Caddy running — SSL issuing for $DOMAIN"
     PANEL_URL="https://$DOMAIN"
   else
-    warn "Caddy start failed — check: systemctl status caddy"
+    warn "Caddy failed to start — check: systemctl status caddy"
     PANEL_URL="http://$VPS_IP:$WP"
   fi
 else
   systemctl stop caddy  > /dev/null 2>&1 || true
   systemctl disable caddy > /dev/null 2>&1 || true
   PANEL_URL="http://$VPS_IP:$WP"
+fi
+
+if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+  ufw allow "$WP"/tcp > /dev/null 2>&1
+  if [ "$USE_SSL" = "true" ]; then
+    ufw allow 80/tcp > /dev/null 2>&1
+    ufw allow 443/tcp > /dev/null 2>&1
+  fi
+  success "Firewall: port $WP allowed"
 fi
 success "Web setup done"
 
@@ -1700,90 +2156,29 @@ pm2 save > /dev/null 2>&1
 pm2 startup 2>/dev/null | grep "sudo" | bash > /dev/null 2>&1 || true
 success "PM2 running"
 
-section "Step 8: Restore Script"
-
-cat > /opt/saypanel/restore.sh << 'RESTOREEOF'
-#!/bin/bash
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-info()    { echo -e "${CYAN}[INFO]${RESET}  $1"; }
-success() { echo -e "${GREEN}[OK]${RESET}    $1"; }
-error()   { echo -e "${RED}[FAIL]${RESET} $1"; exit 1; }
-ask()     { echo -ne "${YELLOW}[?]${RESET}    $1 "; }
-clear
-echo -e "${CYAN} SayPanel v3.0 — Restore${RESET}"
-echo ""
-[ "$EUID" -ne 0 ] && error "Root required!"
-info "Installing packages..."
-apt-get update -qq > /dev/null 2>&1
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-apt-get install -y nodejs > /dev/null 2>&1
-npm i -g pm2 > /dev/null 2>&1
-apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-apt-get update -qq > /dev/null 2>&1 && apt-get install -y caddy > /dev/null 2>&1
-curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
-success "Packages installed"
-echo ""
-echo -e "  ${YELLOW}[1]${RESET} Google Drive"
-echo -e "  ${YELLOW}[2]${RESET} Local file"
-echo ""
-ask "Restore source [1/2]:"
-read -r SRC
-BACKUP_TAR=""
-case "$SRC" in
-  1)
-    ask "rclone remote (default: saypanel-gdrive):"
-    read -r RR; RR=${RR:-saypanel-gdrive}
-    ask "rclone config chalein? (y/n):"
-    read -r RC; [[ "$RC" =~ ^[Yy]$ ]] && rclone config
-    LATEST=$(rclone ls "${RR}:SayPanel-Backups/" 2>/dev/null | sort | tail -1 | awk '{print $2}')
-    [ -z "$LATEST" ] && error "Backup nahi mila!"
-    rclone copy "${RR}:SayPanel-Backups/$LATEST" /tmp/
-    BACKUP_TAR="/tmp/$LATEST"
-    ;;
-  2)
-    ask "Backup .tar.gz file path:"
-    read -r BACKUP_TAR
-    ;;
-esac
-[ -z "$BACKUP_TAR" ] || [ ! -f "$BACKUP_TAR" ] && error "Backup file nahi mili!"
-info "Restoring..."
-mkdir -p /opt/saypanel/agent /opt/saypanel/web /opt/saypanel/servers /opt/saypanel/backups
-tar -xzf "$BACKUP_TAR" -C /opt/saypanel/
-success "Files restored"
-CFG="/opt/saypanel/agent/config.json"
-[ ! -f "$CFG" ] && error "config.json nahi mila!"
-WP=$(node -e "const c=require('$CFG'); console.log(c.web_port||3000)")
-DOMAIN=$(node -e "const c=require('$CFG'); console.log(c.domain||'')")
-USE_SSL=$(node -e "const c=require('$CFG'); console.log(c.use_ssl||false)")
-cd /opt/saypanel/agent && npm init -y > /dev/null 2>&1
-if [ "$USE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then
-  cat > /etc/caddy/Caddyfile << CEOF
-$DOMAIN {
-    reverse_proxy localhost:$WP
-}
-CEOF
-  systemctl enable caddy > /dev/null 2>&1
-  systemctl restart caddy > /dev/null 2>&1
-  PANEL_URL="https://$DOMAIN"
+info "Checking panel health..."
+sleep 3
+if curl -fs "http://127.0.0.1:$WP/api/health" 2>/dev/null | grep -q '"app":"saypanel"'; then
+  success "Panel is responding on port $WP"
 else
-  PANEL_URL="http://$(curl -s ifconfig.me):$WP"
+  warn "Panel is not responding on port $WP — recent logs:"
+  pm2 logs saypanel-agent --lines 15 --nostream
+  error "Panel failed to start. Fix the problem above, then run this installer again."
 fi
-pm2 delete saypanel-agent > /dev/null 2>&1 || true
-pm2 start /opt/saypanel/agent/index.js --name saypanel-agent
-pm2 save > /dev/null 2>&1
-pm2 startup 2>/dev/null | grep "sudo" | bash > /dev/null 2>&1 || true
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "${GREEN}  SayPanel v3.0 Restore Complete!${RESET}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo ""
-echo -e "  Panel:  ${CYAN}${PANEL_URL}${RESET}"
-echo ""
-RESTOREEOF
-chmod +x /opt/saypanel/restore.sh
-success "restore.sh written"
+
+section "Step 8: Backup & Restore Script"
+
+if [ "$BACKUP_ENABLED" = "true" ]; then
+  info "Running first backup..."
+  if BACKUP_RESULT=$(node "$DIR/backup.js" 2>&1); then
+    success "$BACKUP_RESULT"
+  else
+    warn "First backup failed: $BACKUP_RESULT"
+  fi
+  success "restore.sh generated at /opt/saypanel/restore.sh"
+else
+  info "Backups disabled — no restore script generated"
+fi
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -1795,17 +2190,37 @@ echo -e "  ${BOLD}Login:${RESET}         ${SA_EMAIL}"
 echo -e "  ${BOLD}Username:${RESET}      ${SA_USER}"
 echo -e "  ${BOLD}Role:${RESET}          ${YELLOW}Super Admin${RESET}"
 if [ -n "$DOMAIN" ]; then
-echo -e "  ${BOLD}Domain:${RESET}        ${DOMAIN} (SSL auto)"
+  echo -e "  ${BOLD}Domain:${RESET}        ${DOMAIN} (SSL auto)"
 fi
 echo ""
 echo -e "  ${YELLOW}Roles:${RESET}"
-echo -e "  ${CYAN}Super Admin${RESET}  — sab kuch, Users page, server create/delete"
-echo -e "  ${CYAN}Sub-Admin${RESET}    — assigned servers start/stop/logs"
-echo -e "  ${CYAN}User${RESET}         — sirf assigned servers logs dekh sakta hai"
+echo -e "  ${CYAN}Super Admin${RESET}  — full access, Users page, create/delete servers"
+echo -e "  ${CYAN}Sub-Admin${RESET}    — start/stop/logs for assigned servers"
+echo -e "  ${CYAN}User${RESET}         — view logs of assigned servers only"
 echo ""
 echo -e "  ${YELLOW}PM2 commands:${RESET}"
 echo -e "  pm2 logs saypanel-agent"
 echo -e "  pm2 restart saypanel-agent"
 echo ""
-echo -e "  ${BOLD}Browser mein kholo: ${CYAN}${PANEL_URL}${RESET}"
+
+if [ "$BACKUP_ENABLED" = "true" ]; then
+  echo -e "  ${YELLOW}If your VPS is ever lost — restore everything on a new VPS:${RESET}"
+  if [ "$USE_GDRIVE" = "true" ]; then
+    echo -e "  ${CYAN}Google Drive:${RESET} download SayPanel-Backups/restore.sh, upload it to the new VPS, then run:"
+    echo -e "    sudo bash restore.sh"
+  fi
+  if [ "$USE_SUPA" = "true" ]; then
+    echo -e "  ${CYAN}Supabase:${RESET} on the new VPS run:"
+    echo -e "    curl -fsSL -H \"Authorization: Bearer $SUPA_KEY\" -H \"apikey: $SUPA_KEY\" \"$SUPA_URL/storage/v1/object/$SUPA_BUCKET/restore.sh\" -o restore.sh && sudo bash restore.sh"
+  fi
+  if [ "$USE_TG" = "true" ]; then
+    echo -e "  ${CYAN}Telegram:${RESET} restore.sh was sent to your chat. Run: sudo bash restore.sh"
+  fi
+  echo -e "  ${CYAN}Local copy:${RESET} /opt/saypanel/restore.sh"
+  echo -e "  ${RED}restore.sh contains your Drive/Supabase credentials — keep it private.${RESET}"
+  echo ""
+fi
+
+echo -e "  ${BOLD}Open in browser: ${CYAN}${PANEL_URL}${RESET}"
+echo -e "  If it does not open, allow inbound TCP port ${WP} in your cloud firewall (Azure NSG / AWS security group)."
 echo ""
