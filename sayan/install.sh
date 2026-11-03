@@ -1,2226 +1,937 @@
 #!/bin/bash
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-BLUE='\033[0;34m'; MAGENTA='\033[0;35m'
-
-info()    { echo -e "${CYAN}[INFO]${RESET}  $1"; }
-success() { echo -e "${GREEN}[OK]${RESET}    $1"; }
-error()   { echo -e "${RED}[FAIL]${RESET} $1"; exit 1; }
-warn()    { echo -e "${YELLOW}[!]${RESET}    $1"; }
-ask()     { echo -ne "${YELLOW}[?]${RESET}    $1 "; }
-section() { echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n    ${BOLD}$1${RESET}\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"; }
-
-clear
-echo -e "${CYAN}"
-echo " ███████╗ █████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗███████╗██╗     "
-echo " ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗██╔══██╗████╗  ██║██╔════╝██║     "
-echo " ███████╗███████║ ╚████╔╝ ██████╔╝███████║██╔██╗ ██║█████╗  ██║     "
-echo " ╚════██║██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══██║██║╚██╗██║██╔══╝  ██║     "
-echo " ███████║██║  ██║   ██║   ██║     ██║  ██║██║ ╚████║███████╗███████╗"
-echo " ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝"
-echo -e "${RESET}"
-echo -e "  ${BOLD}Self-hosted Server Panel v3.0 PREMIUM — by dark_x_sayan${RESET}"
-echo -e "  ${CYAN}Multi-Role: Super Admin • Sub-Admin • User${RESET}"
-echo ""
-
-[ "$EUID" -ne 0 ] && error "Root required! Run: sudo bash install.sh"
-
-DIR="/opt/saypanel/agent"
-WEB_DIR="/opt/saypanel/web"
-BACKUP_DIR="/opt/saypanel/backups"
-CFG_FILE="$DIR/config.json"
-USERS_FILE="$DIR/users.json"
-mkdir -p "$DIR/logs" /opt/saypanel/servers "$WEB_DIR" "$BACKUP_DIR"
-
-section "Step 1: System Install"
-
+R='\033[0;31m';G='\033[0;32m';Y='\033[1;33m';C='\033[0;36m';B='\033[1m';N='\033[0m';P='\033[1;35m'
+info(){ echo -e "${P} >>>${N} $1"; }
+ok(){ echo -e "${G} [+]${N} $1"; }
+die(){ echo -e "${R} [!] FAILED:${N} $1"; exit 1; }
+ask(){ echo -ne "${P} [?]${N} $1 "; }
+[ "$EUID" -ne 0 ] && die "Run as root: sudo bash install.sh"
+APP=/opt/nexorhosting
 export DEBIAN_FRONTEND=noninteractive
 
-info "Updating system..."
-apt-get update -qq > /dev/null 2>&1
-apt-get install -y curl ca-certificates gnupg tar iproute2 > /dev/null 2>&1
-
-NODE_MAJOR=0
-command -v node > /dev/null 2>&1 && NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
-if [ "$NODE_MAJOR" -ge 20 ]; then
-  success "Node.js $(node -v) already installed — skipping"
-else
-  info "Installing Node.js 20..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-  apt-get install -y nodejs > /dev/null 2>&1
-  command -v node > /dev/null 2>&1 || error "Node.js installation failed"
-  success "Node.js $(node -v) ready"
-fi
-
-if command -v pm2 > /dev/null 2>&1; then
-  success "PM2 $(pm2 -v 2>/dev/null | tail -1) already installed — skipping"
-else
-  info "Installing PM2..."
-  npm i -g pm2 > /dev/null 2>&1
-  command -v pm2 > /dev/null 2>&1 || error "PM2 installation failed"
-  success "PM2 ready"
-fi
-
-if command -v caddy > /dev/null 2>&1; then
-  success "Caddy already installed — skipping"
-else
-  info "Installing Caddy..."
-  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-  apt-get update -qq > /dev/null 2>&1
-  apt-get install -y caddy > /dev/null 2>&1
-  command -v caddy > /dev/null 2>&1 || error "Caddy installation failed"
-  success "Caddy ready"
-fi
-
-if command -v rclone > /dev/null 2>&1; then
-  success "rclone already installed — skipping"
-else
-  info "Installing rclone..."
-  curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
-  command -v rclone > /dev/null 2>&1 || error "rclone installation failed"
-  success "rclone ready"
-fi
-
-section "Step 2: Super Admin Setup"
-
+echo -e "${P}"
+echo '   ___  __ ______  ___    _  __'
+echo '  / __\/ // \ \ / / _ \  | \/ /'
+echo ' _\ \/ _  / _ \ V / /_\ \ >  < '
+echo '/___/_/ /_/ (_) \_/ \___/ /_/\_\'
+echo ''
+echo -e "  ${P}╔══════════════════════════════════════════╗${N}"
+echo -e "  ${P}║        N E X O R  H O S T I N G         ║${N}"
+echo -e "  ${P}║         nexorhosting.com                  ║${N}"
+echo -e "  ${P}║      2026 (c) All Rights Reserved        ║${N}"
+echo -e "  ${P}╚══════════════════════════════════════════╝${N}"
 echo ""
-echo -e "  ${BOLD}Super Admin Account${RESET}"
-echo -e "  ${CYAN}(Full access — can view and control everything)${RESET}"
-echo ""
-
-ask "Super Admin email:"
-read -r SA_EMAIL
-[ -z "$SA_EMAIL" ] && SA_EMAIL="admin@saypanel.local"
-
-ask "Super Admin password:"
-read -rs SA_PASS; echo ""
-[ -z "$SA_PASS" ] && SA_PASS="SayPanel@2024"
-
-ask "Super Admin username:"
-read -r SA_USER
-[ -z "$SA_USER" ] && SA_USER="SuperAdmin"
-
-pm2 delete saypanel-agent > /dev/null 2>&1 || true
-
-port_in_use() { ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -qE "[:.]$1$"; }
-port_owner()  { ss -ltnp 2>/dev/null | grep -E "[:.]$1[[:space:]]" | sed -nE 's/.*users:\(\("([^"]+)".*/\1/p' | head -1; }
-free_port()   { local p=$1; while port_in_use "$p"; do p=$((p+1)); done; echo "$p"; }
-http_code()   { curl -s -o /dev/null -w "%{http_code}" "$@"; }
-
-echo ""
-echo -e "  ${BOLD}Web Panel Port${RESET}"
-echo ""
-
-ask "Web panel port (default: 3000):"
-read -r WP; WP=${WP:-3000}
-while true; do
-  if ! [[ "$WP" =~ ^[0-9]+$ ]] || [ "$WP" -lt 1 ] || [ "$WP" -gt 65535 ]; then
-    warn "Invalid port number"
-    SUGGEST=$(free_port 3001)
-  elif port_in_use "$WP"; then
-    OWNER=$(port_owner "$WP")
-    warn "Port $WP is already in use by: ${OWNER:-another process}"
-    SUGGEST=$(free_port $((WP+1)))
-  else
-    break
-  fi
-  ask "Enter a different port (default: $SUGGEST):"
-  read -r WP; WP=${WP:-$SUGGEST}
-done
-success "Using port $WP"
-
-echo ""
-echo -e "  ${BOLD}Domain Setup${RESET}"
-echo ""
-echo -e "  ${YELLOW}[1]${RESET} Use your own domain (automatic SSL)"
-echo -e "  ${YELLOW}[2]${RESET} IP:Port (no SSL)"
-echo ""
-
-ask "Use a domain? (y/n):"
-read -r USE_DOMAIN
-
-DOMAIN=""
-USE_SSL="false"
-
-if [[ "$USE_DOMAIN" =~ ^[Yy]$ ]]; then
-  ask "Domain/subdomain (e.g. panel.mysite.com):"
-  read -r DOMAIN
-  if [ -n "$DOMAIN" ]; then
-    USE_SSL="true"
-    warn "Point your domain's DNS A record to this VPS IP. Caddy will issue SSL automatically."
-  fi
-fi
-
-section "Step 3: Backup Setup"
-
-echo ""
-echo -e "  ${CYAN}A backup contains the panel, users, servers and all server files.${RESET}"
-echo -e "  ${CYAN}A restore script is generated so everything can be rebuilt on a new VPS.${RESET}"
-echo ""
-
-ask "Enable automatic backups? (y/n):"
-read -r DO_BACKUP
-
-BACKUP_ENABLED="false"
-USE_GDRIVE="false"
-USE_SUPA="false"
-USE_TG="false"
-GD_REMOTE="saypanel-gdrive:SayPanel-Backups"
-SUPA_URL=""
-SUPA_KEY=""
-SUPA_BUCKET="saypanel-backups"
-TG_TOKEN=""
-TG_CHAT=""
-BACKUP_INTERVAL=6
-
-setup_gdrive() {
-  echo ""
-  echo -e "  ${BOLD}Google Drive${RESET}"
-  echo -e "  ${CYAN}On any PC or Termux with rclone installed, run:${RESET} ${BOLD}rclone authorize \"drive\"${RESET}"
-  echo -e "  ${CYAN}Sign in with Google, then copy the token JSON it prints (the line starting with {\"access_token\").${RESET}"
-  echo ""
-  ask "Google Client ID (optional, Enter to skip):"
-  read -r GD_ID
-  ask "Google Client Secret (optional, Enter to skip):"
-  read -r GD_SECRET
-  local X RC_FILE
-  while true; do
-    ask "Paste the rclone token JSON:"
-    read -r GD_TOKEN
-    if [ -z "$GD_TOKEN" ]; then
-      ask "Token is empty. Type 'skip' to disable Google Drive or press Enter to retry:"
-      read -r X; [ "$X" = "skip" ] && return 1
-      continue
-    fi
-    rclone config delete saypanel-gdrive > /dev/null 2>&1 || true
-    RC_FILE=$(rclone config file | tail -1)
-    mkdir -p "$(dirname "$RC_FILE")"
-    {
-      echo ""
-      echo "[saypanel-gdrive]"
-      echo "type = drive"
-      echo "scope = drive"
-      [ -n "$GD_ID" ] && echo "client_id = $GD_ID"
-      [ -n "$GD_SECRET" ] && echo "client_secret = $GD_SECRET"
-      echo "token = $GD_TOKEN"
-    } >> "$RC_FILE"
-    chmod 600 "$RC_FILE"
-    info "Testing Google Drive connection..."
-    if timeout 90 rclone mkdir "$GD_REMOTE" > /dev/null 2>&1 && timeout 90 rclone lsf "$GD_REMOTE" > /dev/null 2>&1; then
-      success "Google Drive connected"
-      return 0
-    fi
-    warn "Google Drive connection failed"
-    ask "Type 'skip' to disable Google Drive or press Enter to try again:"
-    read -r X; [ "$X" = "skip" ] && return 1
-  done
-}
-
-setup_supabase() {
-  echo ""
-  echo -e "  ${BOLD}Supabase Storage${RESET}"
-  echo -e "  ${CYAN}Supabase dashboard → Project Settings → API → copy the Project URL and the service_role key.${RESET}"
-  echo ""
-  local CODE X
-  while true; do
-    ask "Supabase Project URL (e.g. https://abcd.supabase.co):"
-    read -r SUPA_URL; SUPA_URL=${SUPA_URL%/}
-    ask "Supabase service_role key:"
-    read -r SUPA_KEY
-    ask "Storage bucket name (default: saypanel-backups):"
-    read -r SUPA_BUCKET; SUPA_BUCKET=${SUPA_BUCKET:-saypanel-backups}
-    info "Testing Supabase connection..."
-    CODE=$(http_code -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/bucket")
-    if [ "$CODE" = "200" ]; then
-      http_code -X POST "$SUPA_URL/storage/v1/bucket" -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" -H "Content-Type: application/json" -d "{\"id\":\"$SUPA_BUCKET\",\"name\":\"$SUPA_BUCKET\",\"public\":false}" > /dev/null
-      CODE=$(http_code -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/bucket/$SUPA_BUCKET")
-      if [ "$CODE" = "200" ]; then
-        success "Supabase connected (bucket: $SUPA_BUCKET)"
-        return 0
-      fi
-      warn "Could not create or access bucket '$SUPA_BUCKET' (HTTP $CODE)"
-    else
-      warn "Supabase connection failed (HTTP $CODE) — check the URL and make sure you used the service_role key"
-    fi
-    ask "Type 'skip' to disable Supabase or press Enter to try again:"
-    read -r X; [ "$X" = "skip" ] && return 1
-  done
-}
-
-setup_telegram() {
-  echo ""
-  echo -e "  ${BOLD}Telegram${RESET}"
-  echo ""
-  local CODE X
-  while true; do
-    ask "Telegram Bot Token:"
-    read -r TG_TOKEN
-    ask "Telegram Chat ID:"
-    read -r TG_CHAT
-    CODE=$(http_code "https://api.telegram.org/bot$TG_TOKEN/getMe")
-    if [ "$CODE" = "200" ]; then
-      success "Telegram bot verified"
-      return 0
-    fi
-    warn "Telegram bot token is invalid (HTTP $CODE)"
-    ask "Type 'skip' to disable Telegram or press Enter to try again:"
-    read -r X; [ "$X" = "skip" ] && return 1
-  done
-}
-
-if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then
-  BACKUP_ENABLED="true"
-
-  echo ""
-  ask "Back up to Google Drive? (y/n):"
-  read -r A
-  if [[ "$A" =~ ^[Yy]$ ]]; then
-    setup_gdrive && USE_GDRIVE="true"
-  fi
-
-  ask "Back up to Supabase Storage? (y/n):"
-  read -r A
-  if [[ "$A" =~ ^[Yy]$ ]]; then
-    if setup_supabase; then USE_SUPA="true"; else SUPA_URL=""; SUPA_KEY=""; fi
-  fi
-
-  ask "Also send backups to Telegram? (y/n):"
-  read -r A
-  if [[ "$A" =~ ^[Yy]$ ]]; then
-    if setup_telegram; then USE_TG="true"; else TG_TOKEN=""; TG_CHAT=""; fi
-  fi
-
-  if [ "$USE_GDRIVE" != "true" ] && [ "$USE_SUPA" != "true" ] && [ "$USE_TG" != "true" ]; then
-    warn "No cloud destination selected — backups will be stored locally only"
-  fi
-
-  ask "Auto backup interval in hours (default: 6):"
-  read -r BACKUP_INTERVAL; BACKUP_INTERVAL=${BACKUP_INTERVAL:-6}
-  if ! [[ "$BACKUP_INTERVAL" =~ ^[0-9]+$ ]] || [ "$BACKUP_INTERVAL" -lt 1 ]; then BACKUP_INTERVAL=6; fi
-  success "Backups enabled — every $BACKUP_INTERVAL hour(s)"
-fi
-
-section "Step 4: Writing Files"
-
-info "Writing config..."
-WP="$WP" DOMAIN="$DOMAIN" USE_SSL="$USE_SSL" BACKUP_ENABLED="$BACKUP_ENABLED" BACKUP_INTERVAL="$BACKUP_INTERVAL" \
-USE_GDRIVE="$USE_GDRIVE" GD_REMOTE="$GD_REMOTE" USE_SUPA="$USE_SUPA" SUPA_URL="$SUPA_URL" SUPA_KEY="$SUPA_KEY" \
-SUPA_BUCKET="$SUPA_BUCKET" USE_TG="$USE_TG" TG_TOKEN="$TG_TOKEN" TG_CHAT="$TG_CHAT" CFG_FILE="$CFG_FILE" node -e '
-const e = process.env;
-const cfg = {
-  web_port: parseInt(e.WP, 10),
-  domain: e.DOMAIN,
-  use_ssl: e.USE_SSL === "true",
-  backup_enabled: e.BACKUP_ENABLED === "true",
-  backup_interval: parseInt(e.BACKUP_INTERVAL, 10),
-  gdrive: e.USE_GDRIVE === "true",
-  gdrive_remote: e.GD_REMOTE,
-  supabase: e.USE_SUPA === "true",
-  supabase_url: e.SUPA_URL,
-  supabase_key: e.SUPA_KEY,
-  supabase_bucket: e.SUPA_BUCKET,
-  telegram: e.USE_TG === "true",
-  tg_token: e.TG_TOKEN,
-  tg_chat: e.TG_CHAT
-};
-require("fs").writeFileSync(e.CFG_FILE, JSON.stringify(cfg, null, 2));
-'
-chmod 600 "$CFG_FILE"
-success "Config written"
-
-info "Writing users database..."
-SA_EMAIL="$SA_EMAIL" SA_PASS="$SA_PASS" SA_USER="$SA_USER" USERS_FILE="$USERS_FILE" node -e '
-const c = require("crypto"), fs = require("fs"), e = process.env;
-const users = [{
-  id: c.randomBytes(8).toString("hex"),
-  email: e.SA_EMAIL,
-  password: c.createHash("sha256").update(e.SA_PASS).digest("hex"),
-  username: e.SA_USER,
-  role: "superadmin",
-  assigned_servers: [],
-  created_at: new Date().toISOString()
-}];
-fs.writeFileSync(e.USERS_FILE, JSON.stringify(users, null, 2));
-'
-chmod 600 "$USERS_FILE"
-success "Users database written"
-
-info "Writing agent (index.js)..."
-cat > "$DIR/index.js" << 'INDEXEOF'
-const { exec }   = require('child_process');
-const fs         = require('fs');
-const path       = require('path');
-const http       = require('http');
-const crypto     = require('crypto');
-
-const CFG_FILE     = path.join(__dirname, 'config.json');
-const USERS_FILE   = path.join(__dirname, 'users.json');
-const SERVERS_FILE = path.join(__dirname, 'servers.json');
-const LOGS_DIR     = path.join(__dirname, 'logs');
-
-if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
-
-function loadConfig()  { return JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); }
-function loadUsers()   { return fs.existsSync(USERS_FILE)   ? JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'))   : []; }
-function saveUsers(d)  { fs.writeFileSync(USERS_FILE, JSON.stringify(d, null, 2)); }
-function loadServers() { return fs.existsSync(SERVERS_FILE) ? JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8')) : []; }
-function saveServers(d){ fs.writeFileSync(SERVERS_FILE, JSON.stringify(d, null, 2)); }
-
-const { runBackup } = require('./backup');
-
-const config   = loadConfig();
-const WEB_PORT = config.web_port  || 3000;
-
-const sessions = new Map();
-const processes = {};
-
-function genToken() { return crypto.randomBytes(32).toString('hex'); }
-function hashPass(p){ return crypto.createHash('sha256').update(p).digest('hex'); }
-
-function log(level, tag, msg) {
-  process.stdout.write(`[${new Date().toISOString()}] [${level.toUpperCase()}] [${tag}] ${msg}\n`);
-}
-
-function getSessionUser(req) {
-  const ah = req.headers['authorization'] || '';
-  const token = ah.startsWith('Bearer ') ? ah.slice(7) : null;
-  if (!token) return null;
-  if (sessions.has(token)) {
-    const s = sessions.get(token);
-    if (Date.now() < s.exp) return s.user;
-    sessions.delete(token);
-  }
-  return null;
-}
-
-function canAccessServer(user, serverId) {
-  if (user.role === 'superadmin') return true;
-  if (user.role === 'subadmin') {
-    return user.assigned_servers.includes(serverId) || user.assigned_servers.length === 0;
-  }
-  if (user.role === 'user') {
-    return user.assigned_servers.includes(serverId);
-  }
-  return false;
-}
-
-function getVisibleServers(user) {
-  const all = loadServers();
-  if (user.role === 'superadmin') return all;
-  return all.filter(s => user.assigned_servers.includes(s.id));
-}
-
-function getLogs(id, lines) {
-  const f = path.join(LOGS_DIR, `${id}.log`);
-  if (!fs.existsSync(f)) return '(no logs yet)';
-  const content = fs.readFileSync(f, 'utf8');
-  const arr = content.split('\n');
-  return arr.slice(-lines).join('\n');
-}
-
-function appendLog(id, text) {
-  const f = path.join(LOGS_DIR, `${id}.log`);
-  fs.appendFileSync(f, text);
-}
-
-function sysInfo(cb) {
-  exec("free -m | awk '/^Mem:/{print $2,$3}'", (e1, mem) => {
-    exec("df -h / | awk 'NR==2{print $2,$3,$5}'", (e2, disk) => {
-      exec("uptime -p", (e3, up) => {
-        exec("nproc", (e4, cpus) => {
-          const [total, used] = (mem || '0 0').trim().split(' ');
-          const [dTotal, dUsed, dPct] = (disk || '0 0 0%').trim().split(' ');
-          cb({
-            memory: { total: parseInt(total) || 0, used: parseInt(used) || 0 },
-            disk:   { total: dTotal || '?', used: dUsed || '?', percent: parseInt(dPct) || 0 },
-            uptime: (up || '').trim(),
-            cpus:   parseInt(cpus) || 1
-          });
-        });
-      });
-    });
-  });
-}
-
-function startServer(srv) {
-  if (processes[srv.id]) return;
-  const opts = { cwd: srv.directory || '/opt/saypanel/servers', env: { ...process.env, ...(srv.env || {}) } };
-  const child = require('child_process').spawn('bash', ['-c', srv.startup], { ...opts, stdio: ['ignore','pipe','pipe'] });
-  processes[srv.id] = child;
-  const ts = () => new Date().toISOString();
-  child.stdout.on('data', d => appendLog(srv.id, `[${ts()}] ${d}`));
-  child.stderr.on('data', d => appendLog(srv.id, `[${ts()}] [ERR] ${d}`));
-  child.on('exit', (code) => {
-    appendLog(srv.id, `[${ts()}] [EXIT] code=${code}\n`);
-    delete processes[srv.id];
-    const servers = loadServers();
-    const idx = servers.findIndex(s => s.id === srv.id);
-    if (idx !== -1) { servers[idx].status = 'stopped'; saveServers(servers); }
-    log('info', 'PROC', `${srv.name} exited code=${code}`);
-  });
-  const servers = loadServers();
-  const idx = servers.findIndex(s => s.id === srv.id);
-  if (idx !== -1) { servers[idx].status = 'running'; servers[idx].pid = child.pid; saveServers(servers); }
-  log('info', 'PROC', `Started: ${srv.name} pid=${child.pid}`);
-}
-
-function stopServer(id) {
-  const child = processes[id];
-  if (!child) return false;
-  child.kill('SIGTERM');
-  setTimeout(() => { if (processes[id]) { processes[id].kill('SIGKILL'); } }, 5000);
-  delete processes[id];
-  const servers = loadServers();
-  const idx = servers.findIndex(s => s.id === id);
-  if (idx !== -1) { servers[idx].status = 'stopped'; delete servers[idx].pid; saveServers(servers); }
-  return true;
-}
-
-const server = http.createServer((req, res) => {
-  const url      = new URL(req.url, `http://localhost`);
-  const pathname = url.pathname;
-
-  const send = (code, data) => {
-    res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization,Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS' });
-    res.end(JSON.stringify(data));
-  };
-
-  if (req.method === 'OPTIONS') { send(204, {}); return; }
-
-  if (pathname === '/' || pathname === '/index.html') {
-    const htmlPath = path.join(__dirname, '..', 'web', 'index.html');
-    if (fs.existsSync(htmlPath)) {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(fs.readFileSync(htmlPath));
-    } else {
-      res.writeHead(404); res.end('Panel not found');
-    }
-    return;
-  }
-
-  if (!pathname.startsWith('/api/')) { res.writeHead(404); res.end('Not found'); return; }
-
-  if (pathname === '/api/health' && req.method === 'GET') { send(200, { ok: true, app: 'saypanel' }); return; }
-
-  if (pathname === '/api/auth/login' && req.method === 'POST') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { email, password } = JSON.parse(body);
-        const users = loadUsers();
-        const user  = users.find(u => u.email === email && u.password === hashPass(password));
-        if (!user) { send(401, { error: 'Wrong email or password' }); return; }
-        const token = genToken();
-        sessions.set(token, { user, exp: Date.now() + 86400000 });
-        send(200, { ok: true, token, username: user.username, role: user.role, id: user.id });
-        log('info', 'AUTH', `Login: ${email} role=${user.role}`);
-      } catch(e) { send(400, { error: 'Bad request' }); }
-    });
-    return;
-  }
-
-  const sessionUser = getSessionUser(req);
-  if (!sessionUser) { send(401, { error: 'Unauthorized' }); return; }
-
-  if (pathname === '/api/ping' && req.method === 'GET') {
-    send(200, { ok: true, uptime: process.uptime(), user: sessionUser.username, role: sessionUser.role, version: '3.0.0' });
-    return;
-  }
-
-  if (pathname === '/api/system' && req.method === 'GET') {
-    sysInfo(info => send(200, info));
-    return;
-  }
-
-  if (pathname === '/api/servers' && req.method === 'GET') {
-    send(200, getVisibleServers(sessionUser));
-    return;
-  }
-
-  if (pathname === '/api/servers' && req.method === 'POST') {
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { name, directory, startup, env, autostart, assigned_to } = JSON.parse(body);
-        if (!name || !startup) { send(400, { error: 'name and startup required' }); return; }
-        const id = crypto.randomBytes(8).toString('hex');
-        const srv = { id, name, directory: directory || `/opt/saypanel/servers/${id}`, startup, env: env || {}, autostart: !!autostart, status: 'stopped', created_at: new Date().toISOString() };
-        if (!fs.existsSync(srv.directory)) fs.mkdirSync(srv.directory, { recursive: true });
-        const servers = loadServers(); servers.push(srv); saveServers(servers);
-        if (assigned_to && Array.isArray(assigned_to)) {
-          const users = loadUsers();
-          assigned_to.forEach(uid => {
-            const idx = users.findIndex(u => u.id === uid);
-            if (idx !== -1 && !users[idx].assigned_servers.includes(id)) {
-              users[idx].assigned_servers.push(id);
-            }
-          });
-          saveUsers(users);
-        }
-        if (autostart) startServer(srv);
-        send(200, { ok: true, id });
-        log('info', 'API', `Server created: ${name} id=${id}`);
-      } catch(e) { send(400, { error: e.message }); }
-    });
-    return;
-  }
-
-  const srvMatch = pathname.match(/^\/api\/servers\/([^/]+)(\/.*)?$/);
-  if (srvMatch) {
-    const serverId = srvMatch[1];
-    const action   = srvMatch[2] || '';
-
-    if (!canAccessServer(sessionUser, serverId)) { send(403, { error: 'Permission denied' }); return; }
-
-    const servers = loadServers();
-    const srvIdx  = servers.findIndex(s => s.id === serverId);
-
-    if (action === '/start' && req.method === 'POST') {
-      if (srvIdx === -1) { send(404, { error: 'Server not found' }); return; }
-      if (sessionUser.role === 'user') { send(403, { error: 'Permission denied' }); return; }
-      startServer(servers[srvIdx]);
-      send(200, { ok: true });
-      return;
-    }
-
-    if (action === '/stop' && req.method === 'POST') {
-      if (srvIdx === -1) { send(404, { error: 'Server not found' }); return; }
-      if (sessionUser.role === 'user') { send(403, { error: 'Permission denied' }); return; }
-      stopServer(serverId);
-      send(200, { ok: true });
-      return;
-    }
-
-    if (action === '/logs' && req.method === 'GET') {
-      const lines = parseInt(url.searchParams.get('lines') || '200');
-      send(200, { logs: getLogs(serverId, lines) });
-      return;
-    }
-
-    if (action === '' && req.method === 'DELETE') {
-      if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-      stopServer(serverId);
-      const updated = servers.filter(s => s.id !== serverId);
-      saveServers(updated);
-      send(200, { ok: true });
-      return;
-    }
-
-    if (action === '' && req.method === 'PUT') {
-      if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-      let body = '';
-      req.on('data', d => body += d);
-      req.on('end', () => {
-        try {
-          const updates = JSON.parse(body);
-          if (srvIdx !== -1) {
-            servers[srvIdx] = { ...servers[srvIdx], ...updates };
-            saveServers(servers);
-          }
-          send(200, { ok: true });
-        } catch(e) { send(400, { error: e.message }); }
-      });
-      return;
-    }
-
-    send(404, { error: 'Not found' });
-    return;
-  }
-
-  if (pathname === '/api/users' && req.method === 'GET') {
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-    const users = loadUsers().map(u => ({ id: u.id, email: u.email, username: u.username, role: u.role, assigned_servers: u.assigned_servers, created_at: u.created_at }));
-    send(200, users);
-    return;
-  }
-
-  if (pathname === '/api/users' && req.method === 'POST') {
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { email, password, username, role, assigned_servers } = JSON.parse(body);
-        if (!email || !password || !username) { send(400, { error: 'email, password, username required' }); return; }
-        const allowed = ['subadmin', 'user'];
-        if (!allowed.includes(role)) { send(400, { error: 'role must be subadmin or user' }); return; }
-        const users = loadUsers();
-        if (users.find(u => u.email === email)) { send(409, { error: 'Email already exists' }); return; }
-        const id = crypto.randomBytes(8).toString('hex');
-        const newUser = { id, email, password: hashPass(password), username, role, assigned_servers: assigned_servers || [], created_at: new Date().toISOString() };
-        users.push(newUser);
-        saveUsers(users);
-        send(200, { ok: true, id });
-        log('info', 'API', `User created: ${email} role=${role}`);
-      } catch(e) { send(400, { error: e.message }); }
-    });
-    return;
-  }
-
-  const userMatch = pathname.match(/^\/api\/users\/([^/]+)(\/.*)?$/);
-  if (userMatch) {
-    const uid    = userMatch[1];
-    const action = userMatch[2] || '';
-
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-
-    const users = loadUsers();
-    const uIdx  = users.findIndex(u => u.id === uid);
-
-    if (action === '' && req.method === 'PUT') {
-      let body = '';
-      req.on('data', d => body += d);
-      req.on('end', () => {
-        try {
-          const updates = JSON.parse(body);
-          if (uIdx === -1) { send(404, { error: 'User not found' }); return; }
-          if (users[uIdx].role === 'superadmin') { send(403, { error: 'Cannot modify superadmin' }); return; }
-          if (updates.password) updates.password = hashPass(updates.password);
-          users[uIdx] = { ...users[uIdx], ...updates };
-          saveUsers(users);
-          send(200, { ok: true });
-        } catch(e) { send(400, { error: e.message }); }
-      });
-      return;
-    }
-
-    if (action === '' && req.method === 'DELETE') {
-      if (uIdx === -1) { send(404, { error: 'User not found' }); return; }
-      if (users[uIdx].role === 'superadmin') { send(403, { error: 'Cannot delete superadmin' }); return; }
-      users.splice(uIdx, 1);
-      saveUsers(users);
-      send(200, { ok: true });
-      return;
-    }
-
-    if (action === '/assign' && req.method === 'POST') {
-      let body = '';
-      req.on('data', d => body += d);
-      req.on('end', () => {
-        try {
-          const { server_ids } = JSON.parse(body);
-          if (uIdx === -1) { send(404, { error: 'User not found' }); return; }
-          users[uIdx].assigned_servers = Array.isArray(server_ids) ? server_ids : [];
-          saveUsers(users);
-          send(200, { ok: true });
-        } catch(e) { send(400, { error: e.message }); }
-      });
-      return;
-    }
-
-    send(404, { error: 'Not found' });
-    return;
-  }
-
-  if (pathname === '/api/backup' && req.method === 'POST') {
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-    runBackup((err, msg) => {
-      if (err) send(500, { error: err });
-      else send(200, { ok: true, message: msg });
-    });
-    return;
-  }
-
-  if (pathname === '/api/config' && req.method === 'GET') {
-    if (sessionUser.role !== 'superadmin') { send(403, { error: 'Permission denied' }); return; }
-    const cfg = loadConfig();
-    send(200, { domain: cfg.domain || '', use_ssl: cfg.use_ssl || false, backup_enabled: !!cfg.backup_enabled, gdrive: !!cfg.gdrive, supabase: !!cfg.supabase, telegram: !!cfg.telegram, web_port: cfg.web_port, version: '3.0.0' });
-    return;
-  }
-
-  send(404, { error: 'Not found' });
-});
-
-server.on('error', (e) => {
-  log('error', 'HTTP', e.code === 'EADDRINUSE' ? `Port ${WEB_PORT} is already in use by another process` : e.message);
-  process.exit(1);
-});
-
-server.listen(WEB_PORT, '0.0.0.0', () => {
-  log('info', 'HTTP', `Panel running on port ${WEB_PORT}`);
-});
-
-const servers = loadServers();
-servers.filter(s => s.autostart).forEach(s => {
-  log('info', 'BOOT', `Auto-starting: ${s.name}`);
-  setTimeout(() => startServer(s), 2000);
-});
-
-if (config.backup_enabled && config.backup_interval > 0) {
-  setInterval(() => { runBackup((err, msg) => { if (msg) log('info', 'BACKUP', msg); if (err) log('error', 'BACKUP', err); }); }, config.backup_interval * 3600 * 1000);
-}
-INDEXEOF
-success "Agent written"
-
-info "Writing backup module..."
-cat > "$DIR/backup.js" << 'BACKUPEOF'
-const { execFile } = require('child_process');
-const fs   = require('fs');
-const path = require('path');
-
-const ROOT        = process.env.SAYPANEL_ROOT || '/opt/saypanel';
-const AGENT_DIR   = path.join(ROOT, 'agent');
-const BACKUP_DIR  = path.join(ROOT, 'backups');
-const CFG_FILE    = path.join(AGENT_DIR, 'config.json');
-const SERVERS_FILE = path.join(AGENT_DIR, 'servers.json');
-const TEMPLATE    = path.join(AGENT_DIR, 'restore.template.sh');
-const RESTORE_OUT = path.join(ROOT, 'restore.sh');
-const KEEP_LOCAL  = 5;
-const KEEP_SUPA   = 10;
-const KEEP_DRIVE_DAYS = '14d';
-
-let running = false;
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 64 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
-      if (err) {
-        const e = new Error(((stderr || '').toString().trim() || err.message).slice(0, 300));
-        e.code = err.code;
-        reject(e);
-      } else resolve(stdout.toString());
-    });
-  });
-}
-
-function loadConfig() { return JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); }
-
-function extraServerDirs() {
-  if (!fs.existsSync(SERVERS_FILE)) return [];
-  let servers = [];
-  try { servers = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8')); } catch (e) { return []; }
-  const base = path.join(ROOT, 'servers');
-  const dirs = new Set();
-  for (const s of servers) {
-    if (!s.directory) continue;
-    const d = path.resolve(s.directory);
-    if (d === '/' || d === ROOT || d.startsWith(base + path.sep) || d === base) continue;
-    if (d.startsWith(ROOT + path.sep)) continue;
-    if (fs.existsSync(d)) dirs.add(d);
-  }
-  return [...dirs];
-}
-
-async function buildRestoreScript(cfg) {
-  let rcloneConf = '';
-  if (cfg.gdrive) {
-    try { rcloneConf = await run('rclone', ['config', 'show', 'saypanel-gdrive']); } catch (e) { rcloneConf = ''; }
-  }
-  const values = {
-    __RCLONE_CONF_B64__: Buffer.from(rcloneConf).toString('base64'),
-    __GDRIVE_REMOTE__:   cfg.gdrive ? (cfg.gdrive_remote || '') : '',
-    __SUPA_URL__:        cfg.supabase ? cfg.supabase_url : '',
-    __SUPA_KEY__:        cfg.supabase ? cfg.supabase_key : '',
-    __SUPA_BUCKET__:     cfg.supabase ? cfg.supabase_bucket : ''
-  };
-  let tpl = fs.readFileSync(TEMPLATE, 'utf8');
-  for (const [k, v] of Object.entries(values)) tpl = tpl.split(k).join(v);
-  fs.writeFileSync(RESTORE_OUT, tpl, { mode: 0o700 });
-  return RESTORE_OUT;
-}
-
-async function createArchive(ts) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const file = path.join(BACKUP_DIR, `saypanel-backup-${ts}.tar.gz`);
-  const rel = (p) => p.replace(/^\/+/, '');
-  const members = [rel(AGENT_DIR), rel(path.join(ROOT, 'web')), rel(path.join(ROOT, 'servers')), ...extraServerDirs().map(rel)]
-    .filter(m => fs.existsSync(path.join('/', m)));
-  const args = ['-czf', file, '--exclude=node_modules', '--exclude=*.log', `--exclude=${rel(path.join(AGENT_DIR, 'logs'))}`, '-C', '/', ...members];
-  try {
-    await run('tar', args);
-  } catch (e) {
-    if (e.code !== 1) throw e;
-  }
-  return file;
-}
-
-function pruneLocal() {
-  const files = fs.readdirSync(BACKUP_DIR).filter(f => /^saypanel-backup-.*\.tar\.gz$/.test(f)).sort();
-  files.slice(0, Math.max(0, files.length - KEEP_LOCAL)).forEach(f => {
-    try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) {}
-  });
-}
-
-async function uploadGdrive(cfg, file, restore) {
-  const remote = cfg.gdrive_remote;
-  await run('rclone', ['copyto', file, `${remote}/${path.basename(file)}`]);
-  await run('rclone', ['copyto', restore, `${remote}/restore.sh`]);
-  try { await run('rclone', ['delete', remote, '--include', 'saypanel-backup-*.tar.gz', '--min-age', KEEP_DRIVE_DAYS]); } catch (e) {}
-}
-
-function supaHeaders(cfg, extra = {}) {
-  return { Authorization: `Bearer ${cfg.supabase_key}`, apikey: cfg.supabase_key, ...extra };
-}
-
-async function supaUpload(cfg, file, objectName, contentType) {
-  const url = `${cfg.supabase_url}/storage/v1/object/${cfg.supabase_bucket}/${objectName}`;
-  const out = await run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '-X', 'POST', url,
-    '-H', `Authorization: Bearer ${cfg.supabase_key}`, '-H', `apikey: ${cfg.supabase_key}`,
-    '-H', 'x-upsert: true', '-H', `Content-Type: ${contentType}`, '--data-binary', `@${file}`]);
-  if (out.trim() !== '200') throw new Error(`Supabase upload failed (HTTP ${out.trim()})`);
-}
-
-async function supaPrune(cfg) {
-  const r = await fetch(`${cfg.supabase_url}/storage/v1/object/list/${cfg.supabase_bucket}`, {
-    method: 'POST',
-    headers: supaHeaders(cfg, { 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ prefix: '', limit: 200, sortBy: { column: 'name', order: 'desc' } })
-  });
-  if (!r.ok) return;
-  const rows = await r.json();
-  const old = rows.map(x => x.name).filter(n => n.startsWith('saypanel-backup-')).sort().reverse().slice(KEEP_SUPA);
-  if (!old.length) return;
-  await fetch(`${cfg.supabase_url}/storage/v1/object/${cfg.supabase_bucket}`, {
-    method: 'DELETE',
-    headers: supaHeaders(cfg, { 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ prefixes: old })
-  });
-}
-
-async function uploadSupabase(cfg, file, restore) {
-  await supaUpload(cfg, file, path.basename(file), 'application/gzip');
-  await supaUpload(cfg, restore, 'restore.sh', 'application/octet-stream');
-  try { await supaPrune(cfg); } catch (e) {}
-}
-
-async function sendTelegram(cfg, file, restore, ts) {
-  const api = `https://api.telegram.org/bot${cfg.tg_token}/sendDocument`;
-  const send = (f, caption) => run('curl', ['-s', '-f', '-F', `chat_id=${cfg.tg_chat}`, '-F', `document=@${f}`, '-F', `caption=${caption}`, api]);
-  await send(restore, `SayPanel restore script ${ts}`);
-  if (fs.statSync(file).size <= 49 * 1024 * 1024) {
-    await send(file, `SayPanel backup ${ts}`);
-    return 'Telegram: backup + restore script sent';
-  }
-  return 'Telegram: restore script sent (backup is over 50 MB, skipped)';
-}
-
-async function performBackup() {
-  if (running) throw new Error('A backup is already running');
-  running = true;
-  try {
-    const cfg = loadConfig();
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const restore = await buildRestoreScript(cfg);
-    const file = await createArchive(ts);
-    pruneLocal();
-    const size = (fs.statSync(file).size / 1048576).toFixed(1);
-    const ok = [`Local: ${path.basename(file)} (${size} MB)`];
-    const failed = [];
-    const jobs = [];
-    if (cfg.gdrive)   jobs.push(['Google Drive', () => uploadGdrive(cfg, file, restore).then(() => 'Google Drive: uploaded')]);
-    if (cfg.supabase) jobs.push(['Supabase', () => uploadSupabase(cfg, file, restore).then(() => 'Supabase: uploaded')]);
-    if (cfg.telegram) jobs.push(['Telegram', () => sendTelegram(cfg, file, restore, ts)]);
-    for (const [name, job] of jobs) {
-      try { ok.push(await job()); } catch (e) { failed.push(`${name}: ${e.message}`); }
-    }
-    if (jobs.length && failed.length === jobs.length) throw new Error(failed.join(' | '));
-    return ok.join(' | ') + (failed.length ? ` | FAILED -> ${failed.join(' | ')}` : '');
-  } finally {
-    running = false;
-  }
-}
-
-function runBackup(cb) {
-  performBackup().then(msg => { if (cb) cb(null, msg); }).catch(err => { if (cb) cb(err.message); });
-}
-
-module.exports = { runBackup, performBackup, buildRestoreScript };
-
-if (require.main === module) {
-  performBackup()
-    .then(msg => { console.log(msg); process.exit(0); })
-    .catch(err => { console.error(err.message); process.exit(1); });
-}
-BACKUPEOF
-cat > "$DIR/restore.template.sh" << 'RESTORETPLEOF'
-#!/bin/bash
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-info()    { echo -e "${CYAN}[INFO]${RESET}  $1"; }
-success() { echo -e "${GREEN}[OK]${RESET}    $1"; }
-warn()    { echo -e "${YELLOW}[!]${RESET}    $1"; }
-error()   { echo -e "${RED}[FAIL]${RESET} $1"; exit 1; }
-
-RCLONE_CONF_B64='__RCLONE_CONF_B64__'
-GDRIVE_REMOTE='__GDRIVE_REMOTE__'
-SUPA_URL='__SUPA_URL__'
-SUPA_KEY='__SUPA_KEY__'
-SUPA_BUCKET='__SUPA_BUCKET__'
-
-ROOT="/opt/saypanel"
-TMP="/tmp/saypanel-restore"
-LOCAL_FILE="$1"
-
-[ "$EUID" -ne 0 ] && error "Root required! Run: sudo bash restore.sh"
-
-echo ""
-echo -e "${CYAN}  SayPanel v3.0 — Full Restore${RESET}"
+echo -e "  ${B}Starting installation...${N}"
 echo ""
 
 info "Installing system packages..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq > /dev/null 2>&1
-apt-get install -y curl ca-certificates gnupg tar iproute2 > /dev/null 2>&1
-
-if ! command -v node > /dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-  apt-get install -y nodejs > /dev/null 2>&1
+apt-get update -qq >/dev/null 2>&1
+apt-get install -y curl ca-certificates gnupg unzip tar zip debian-keyring debian-archive-keyring apt-transport-https >/dev/null 2>&1
+if ! command -v docker >/dev/null 2>&1; then
+  info "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1
+  command -v docker >/dev/null 2>&1 || die "Docker install failed"
 fi
-command -v node > /dev/null 2>&1 || error "Node.js installation failed"
-command -v pm2 > /dev/null 2>&1 || npm i -g pm2 > /dev/null 2>&1
-command -v rclone > /dev/null 2>&1 || curl -s https://rclone.org/install.sh | bash > /dev/null 2>&1
-success "Packages ready (Node $(node -v))"
-
-mkdir -p "$TMP"
-rm -f "$TMP"/*.tar.gz
-FOUND=""
-
-if [ -n "$LOCAL_FILE" ] && [ -f "$LOCAL_FILE" ]; then
-  FOUND="$LOCAL_FILE"
-  success "Using local backup file: $LOCAL_FILE"
+systemctl enable --now docker >/dev/null 2>&1
+ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+NM=0; command -v node >/dev/null 2>&1 && NM=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$NM" -lt 18 ]; then
+  info "Installing Node.js 20..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+  apt-get install -y nodejs >/dev/null 2>&1
+  command -v node >/dev/null 2>&1 || die "Node.js install failed"
 fi
-
-if [ -z "$FOUND" ] && [ -n "$RCLONE_CONF_B64" ] && [ -n "$GDRIVE_REMOTE" ]; then
-  info "Looking for the latest backup on Google Drive..."
-  RC_FILE=$(rclone config file | tail -1)
-  mkdir -p "$(dirname "$RC_FILE")"
-  [ -f "$RC_FILE" ] && cp "$RC_FILE" "$RC_FILE.bak"
-  echo "$RCLONE_CONF_B64" | base64 -d > "$RC_FILE"
-  chmod 600 "$RC_FILE"
-  LATEST=$(rclone lsf "$GDRIVE_REMOTE" --include "saypanel-backup-*.tar.gz" 2>/dev/null | sort | tail -1)
-  if [ -n "$LATEST" ] && rclone copyto "$GDRIVE_REMOTE/$LATEST" "$TMP/$LATEST" > /dev/null 2>&1; then
-    FOUND="$TMP/$LATEST"
-    success "Downloaded from Google Drive: $LATEST"
-  else
-    warn "Google Drive backup not available"
-  fi
+ok "Node.js $(node -v)"
+command -v pm2 >/dev/null 2>&1 || npm i -g pm2 >/dev/null 2>&1
+ok "PM2 ready"
+if ! command -v caddy >/dev/null 2>&1; then
+  info "Installing Caddy..."
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y caddy >/dev/null 2>&1
 fi
-
-if [ -z "$FOUND" ] && [ -n "$SUPA_URL" ]; then
-  info "Looking for the latest backup on Supabase..."
-  NAME=$(curl -s -X POST "$SUPA_URL/storage/v1/object/list/$SUPA_BUCKET" \
-    -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" -H "Content-Type: application/json" \
-    -d '{"prefix":"","limit":200,"sortBy":{"column":"name","order":"desc"}}' | node -e '
-let d = "";
-process.stdin.on("data", c => d += c).on("end", () => {
-  try {
-    const a = JSON.parse(d).map(x => x.name).filter(n => n.startsWith("saypanel-backup-")).sort().reverse();
-    console.log(a[0] || "");
-  } catch (e) { console.log(""); }
-});')
-  if [ -n "$NAME" ] && curl -s -f -o "$TMP/$NAME" -H "Authorization: Bearer $SUPA_KEY" -H "apikey: $SUPA_KEY" "$SUPA_URL/storage/v1/object/$SUPA_BUCKET/$NAME"; then
-    FOUND="$TMP/$NAME"
-    success "Downloaded from Supabase: $NAME"
-  else
-    warn "Supabase backup not available"
-  fi
+mkdir -p $APP/public $APP/data
+if [ ! -f $APP/config.json ]; then
+  echo ""
+  ask "Admin email:"; read -r AE; AE=${AE:-admin@example.com}
+  ask "Admin password:"; read -rs AP; echo ""; AP=${AP:-ChangeMe123}
+  ask "Panel port (default 3000):"; read -r PORT; PORT=${PORT:-3000}
+  ask "Domain (optional - press Enter to skip, you can add it later from Admin > Settings):"; read -r DOM
+  IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
+  AE="$AE" AP="$AP" PORT="$PORT" DOM="$DOM" IP="$IP" CF="$APP/config.json" node -e '
+const e=process.env,c=require("crypto");
+require("fs").writeFileSync(e.CF,JSON.stringify({port:parseInt(e.PORT,10),secret:c.randomBytes(32).toString("hex"),admin_email:e.AE,admin_password:e.AP,domain:e.DOM.trim().toLowerCase(),host:e.IP},null,2));
+'
+  chmod 600 $APP/config.json
+  FRESH=1
 fi
-
-[ -z "$FOUND" ] && error "No backup found. Usage: sudo bash restore.sh /path/to/saypanel-backup.tar.gz"
-
-info "Restoring files..."
-pm2 delete saypanel-agent > /dev/null 2>&1 || true
-tar -xzf "$FOUND" -C / || error "Backup archive is corrupted"
-mkdir -p "$ROOT/agent/logs" "$ROOT/backups" "$ROOT/web" "$ROOT/servers"
-CFG="$ROOT/agent/config.json"
-[ ! -f "$CFG" ] && error "config.json missing in backup"
-success "Files restored"
-
-port_in_use() { ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -qE "[:.]$1$"; }
-
-WP=$(node -p "require('$CFG').web_port || 3000")
-DOMAIN=$(node -p "require('$CFG').domain || ''")
-USE_SSL=$(node -p "require('$CFG').use_ssl === true")
-
-if port_in_use "$WP"; then
-  OLD_WP="$WP"
-  while port_in_use "$WP"; do WP=$((WP+1)); done
-  node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('$CFG','utf8'));c.web_port=$WP;fs.writeFileSync('$CFG',JSON.stringify(c,null,2));"
-  warn "Port $OLD_WP is busy on this VPS — panel moved to port $WP"
-fi
-
-info "Installing dependencies for restored servers..."
-for d in "$ROOT"/servers/*/; do
-  if [ -f "${d}package.json" ] && [ ! -d "${d}node_modules" ]; then
-    info "npm install: $(basename "$d")"
-    (cd "$d" && npm install --omit=dev > /dev/null 2>&1) || warn "npm install failed in $d"
-  fi
-done
-
-VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-
-if [ "$USE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then
-  info "Configuring Caddy for $DOMAIN..."
-  if ! command -v caddy > /dev/null 2>&1; then
-    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https > /dev/null 2>&1
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-    apt-get update -qq > /dev/null 2>&1
-    apt-get install -y caddy > /dev/null 2>&1
-  fi
-  cat > /etc/caddy/Caddyfile << CEOF
-$DOMAIN {
-    reverse_proxy localhost:$WP
+info "Writing panel files..."
+cat > $APP/server.js << 'SERVEREOF'
+const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto');
+const {spawn,execFile,exec}=require('child_process');
+const ROOT=__dirname,DATA=path.join(ROOT,'data'),VOL=path.join(DATA,'volumes'),BK=path.join(DATA,'backups'),DBF=path.join(DATA,'db.json'),PUB=path.join(ROOT,'public');
+[DATA,VOL,BK].forEach(d=>fs.mkdirSync(d,{recursive:true}));
+const CFG=JSON.parse(fs.readFileSync(path.join(ROOT,'config.json'),'utf8'));
+const uid=()=>crypto.randomBytes(6).toString('hex');
+const hashPw=p=>{const s=crypto.randomBytes(8).toString('hex');return s+':'+crypto.scryptSync(p,s,32).toString('hex')};
+const checkPw=(p,h)=>{try{const[s,x]=h.split(':');return crypto.timingSafeEqual(Buffer.from(x,'hex'),crypto.scryptSync(p,s,32))}catch{return false}};
+const IMG='ghcr.io/parkervcp/yolks:';
+const seedEggs=()=>[
+{id:uid(),name:'Node.js',author:'nexorhosting',description:'Node.js apps and bots',docker_images:{'Node.js 24':IMG+'nodejs_24','Node.js 22':IMG+'nodejs_22','Node.js 20':IMG+'nodejs_20','Node.js 18':IMG+'nodejs_18','Node.js 16':IMG+'nodejs_16'},
+startup:'if [[ -d .git ]] && [[ {{AUTO_UPDATE}} == "1" ]]; then git pull; fi; if [[ ! -z ${NODE_PACKAGES} ]]; then /usr/local/bin/npm install ${NODE_PACKAGES}; fi; if [ -f /home/container/package.json ]; then /usr/local/bin/npm install; fi; /usr/local/bin/node /home/container/{{JS_FILE}}',
+variables:[{name:'Main JS File',env_variable:'JS_FILE',default_value:'index.js'},{name:'Additional Node Packages',env_variable:'NODE_PACKAGES',default_value:''},{name:'Auto Update',env_variable:'AUTO_UPDATE',default_value:'0'}],scripts:{installation:null}},
+{id:uid(),name:'Python',author:'nexorhosting',description:'Python apps and bots',docker_images:{'Python 3.13':IMG+'python_3.13','Python 3.12':IMG+'python_3.12','Python 3.11':IMG+'python_3.11','Python 3.10':IMG+'python_3.10'},
+startup:'if [ -f requirements.txt ]; then pip install -U --user -r requirements.txt; fi; python3 /home/container/{{PY_FILE}}',
+variables:[{name:'Main Python File',env_variable:'PY_FILE',default_value:'main.py'}],scripts:{installation:null}},
+{id:uid(),name:'Minecraft Paper',author:'nexorhosting',description:'PaperMC Minecraft server',docker_images:{'Java 21':IMG+'java_21','Java 17':IMG+'java_17','Java 11':IMG+'java_11','Java 8':IMG+'java_8'},
+startup:'java -Xms128M -Xmx{{SERVER_MEMORY}}M -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}',
+variables:[{name:'Server Jar File',env_variable:'SERVER_JARFILE',default_value:'server.jar'},{name:'Minecraft Version',env_variable:'MINECRAFT_VERSION',default_value:'latest'}],
+scripts:{installation:{container:'ghcr.io/parkervcp/installers:alpine',entrypoint:'ash',script:'apk add --no-cache curl jq >/dev/null 2>&1; cd /mnt/server; V=${MINECRAFT_VERSION}; [ "$V" = latest ] && V=$(curl -s https://api.papermc.io/v2/projects/paper | jq -r ".versions[-1]"); B=$(curl -s https://api.papermc.io/v2/projects/paper/versions/$V | jq -r ".builds[-1]"); curl -o ${SERVER_JARFILE} -L https://api.papermc.io/v2/projects/paper/versions/$V/builds/$B/downloads/paper-$V-$B.jar; echo "eula=true" > eula.txt; [ -f server.properties ] || echo "server-port=${SERVER_PORT}" > server.properties'}}},
+{id:uid(),name:'Minecraft Bedrock',author:'nexorhosting',description:'Minecraft Bedrock Edition server',docker_images:{'Bedrock Latest':'ghcr.io/parkervcp/yolks:debian'},
+startup:'chmod +x bedrock_server && LD_LIBRARY_PATH=. ./bedrock_server',
+variables:[{name:'Server Version',env_variable:'BEDROCK_VERSION',default_value:'latest',user_editable:true}],
+scripts:{installation:{container:'ghcr.io/parkervcp/installers:alpine',entrypoint:'ash',script:'apk add --no-cache curl unzip >/dev/null 2>&1; cd /mnt/server; curl -L "https://minecraft.azureedge.net/bin-linux/bedrock-server-1.20.81.01.zip" -o bds.zip 2>/dev/null || curl -L "https://github.com/pmmp/PocketMine-MP/releases/latest/download/PocketMine-MP.phar" -o PocketMine-MP.phar; [ -f bds.zip ] && unzip -o bds.zip && rm bds.zip; echo "server-port=${SERVER_PORT}" >> server.properties'}}},
+{id:uid(),name:'Java Application',author:'nexorhosting',description:'Generic Java application / JAR',docker_images:{'Java 21':IMG+'java_21','Java 17':IMG+'java_17','Java 11':IMG+'java_11','Java 8':IMG+'java_8'},
+startup:'java -Xms128M -Xmx{{SERVER_MEMORY}}M {{JAVA_ARGS}} -jar /home/container/{{JAR_FILE}}',
+variables:[{name:'Jar File',env_variable:'JAR_FILE',default_value:'app.jar',user_editable:true},{name:'Java Args',env_variable:'JAVA_ARGS',default_value:'',user_editable:true}],scripts:{installation:null}},
+{id:uid(),name:'Go Application',author:'nexorhosting',description:'Golang apps and bots',docker_images:{'Go 1.22':IMG+'go_1.22','Go 1.21':IMG+'go_1.21'},
+startup:'if [ -f go.mod ]; then go build -o app . && ./app; else go run /home/container/{{GO_FILE}}; fi',
+variables:[{name:'Main Go File',env_variable:'GO_FILE',default_value:'main.go',user_editable:true}],scripts:{installation:null}},
+{id:uid(),name:'Rust Application',author:'nexorhosting',description:'Rust apps',docker_images:{'Rust Latest':IMG+'rust'},
+startup:'cargo build --release 2>&1 && ./target/release/{{BIN_NAME}}',
+variables:[{name:'Binary Name',env_variable:'BIN_NAME',default_value:'app',user_editable:true}],scripts:{installation:null}},
+{id:uid(),name:'Generic Shell',author:'nexorhosting',description:'Generic bash/shell script runner',docker_images:{'Debian':IMG+'debian','Alpine':IMG+'alpine'},
+startup:'bash /home/container/{{SCRIPT_FILE}}',
+variables:[{name:'Script File',env_variable:'SCRIPT_FILE',default_value:'start.sh',user_editable:true}],scripts:{installation:null}}
+];
+let db=fs.existsSync(DBF)?JSON.parse(fs.readFileSync(DBF,'utf8')):null;
+let st=null;
+const save=()=>{clearTimeout(st);st=setTimeout(()=>fs.writeFileSync(DBF,JSON.stringify(db,null,1)),150)};
+if(!db){
+db={users:[{id:uid(),email:CFG.admin_email,username:'admin',password:hashPw(CFG.admin_password),admin:true}],eggs:seedEggs(),servers:[],allocations:[],settings:{name:'NEXOR HOSTING',domain:CFG.domain||'',host:CFG.host||''},activity:[]};
+for(const[a,b]of[[25565,25575],[21000,21030]])for(let p=a;p<=b;p++)db.allocations.push({id:uid(),ip:'0.0.0.0',port:p,server:null});
+fs.writeFileSync(DBF,JSON.stringify(db,null,1));
 }
-CEOF
-  systemctl enable caddy > /dev/null 2>&1
-  systemctl restart caddy > /dev/null 2>&1
-  PANEL_URL="https://$DOMAIN"
-  warn "Update your domain's DNS A record to the new IP: $VPS_IP"
-else
-  PANEL_URL="http://$VPS_IP:$WP"
-fi
-
-if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow "$WP"/tcp > /dev/null 2>&1
-  [ "$USE_SSL" = "true" ] && { ufw allow 80/tcp > /dev/null 2>&1; ufw allow 443/tcp > /dev/null 2>&1; }
-fi
-
-info "Starting panel..."
-cd "$ROOT/agent" && npm init -y > /dev/null 2>&1
-pm2 start "$ROOT/agent/index.js" --name saypanel-agent > /dev/null 2>&1
-pm2 save > /dev/null 2>&1
-pm2 startup 2>/dev/null | grep "sudo" | bash > /dev/null 2>&1 || true
-sleep 3
-
-if curl -fs "http://127.0.0.1:$WP/api/health" 2>/dev/null | grep -q '"app":"saypanel"'; then
-  success "Panel is responding on port $WP"
-else
-  warn "Panel is not responding — recent logs:"
-  pm2 logs saypanel-agent --lines 15 --nostream
-fi
-
-if [ "$(node -p "require('$CFG').backup_enabled === true")" = "true" ]; then
-  (cd "$ROOT/agent" && node backup.js > /dev/null 2>&1 &)
-fi
-
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "${GREEN}  SayPanel Restore Complete!${RESET}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo ""
-echo -e "  ${BOLD}Panel URL:${RESET} ${CYAN}${PANEL_URL}${RESET}"
-echo -e "  Login with your old email and password."
-echo -e "  If the page does not open, allow inbound TCP port ${WP} in your cloud firewall."
-echo ""
-RESTORETPLEOF
-success "Backup module written"
-
-section "Step 5: Writing Premium Panel UI"
-
-info "Writing index.html..."
-cat > "$WEB_DIR/index.html" << 'HTMLEOF'
+const sign=d=>{const b=Buffer.from(JSON.stringify(d)).toString('base64url');return b+'.'+crypto.createHmac('sha256',CFG.secret).update(b).digest('base64url')};
+const verify=t=>{try{const[b,m]=String(t).split('.');if(m!==crypto.createHmac('sha256',CFG.secret).update(b).digest('base64url'))return null;const d=JSON.parse(Buffer.from(b,'base64url'));return d.exp>Date.now()?db.users.find(u=>u.id===d.u):null}catch{return null}};
+const act=(sid,user,ev,d='')=>{db.activity.unshift({t:Date.now(),s:sid,u:user,ev,d});if(db.activity.length>2000)db.activity.length=2000;save()};
+const run=(c,a)=>new Promise(r=>execFile(c,a,{maxBuffer:1<<26},(e,o,se)=>r({e,o:String(o||'').trim(),se:String(se||'').trim()})));
+const rt={};
+const R=id=>rt[id]||(rt[id]={subs:new Set(),state:'offline',stats:null,disk:0,pending:null,since:0,lp:null,si:null});
+const nm=id=>'sp_'+id;
+const volOf=id=>path.join(VOL,id);
+const emit=(id,type,data)=>{const m=`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;for(const r of R(id).subs)r.write(m)};
+const say=(id,t)=>emit(id,'log',t.endsWith('\n')?t:t+'\n');
+const pub=id=>{const r=R(id);return{state:r.state,stats:r.stats,diskUsed:r.disk,since:r.since}};
+const sz=s=>{const m=/([\d.]+)\s*([kKMGT]?i?B)/.exec(s||'');if(!m)return 0;const u={B:1,kB:1e3,KB:1e3,KiB:1024,MB:1e6,MiB:1048576,GB:1e9,GiB:1073741824,TB:1e12,TiB:1099511627776};return parseFloat(m[1])*(u[m[2]]||1)};
+const eggOf=s=>db.eggs.find(e=>e.id===s.egg);
+const allocsOf=s=>db.allocations.filter(a=>a.server===s.id).sort((a,b)=>(b.primary?1:0)-(a.primary?1:0));
+const own=p=>execFile('chown',['-R','988:988',p],()=>{});
+const envOf=s=>{const a=allocsOf(s)[0]||{};return{...s.vars,SERVER_MEMORY:String(Math.floor((s.memory||1024)*0.9)),SERVER_PORT:String(a.port||''),SERVER_IP:a.ip||'0.0.0.0',STARTUP_IMAGE:s.image}};
+const fill=(t,e)=>t.replace(/\{\{server\.build\.default\.port\}\}/g,e.SERVER_PORT).replace(/\{\{\s*(?:env\.)?([A-Z0-9_]+)\s*\}\}/g,(m,k)=>e[k]??'');
+const ownerArgs=(s)=>{const e=envOf(s);return Object.entries(e).flatMap(([k,v])=>['-e',k+'='+v])};
+async function ensureImage(id,img){
+const i=await run('docker',['image','inspect',img]);
+if(!i.e)return true;
+say(id,'[panel] Pulling image '+img+' ...');
+return new Promise(r=>{const c=spawn('docker',['pull',img],{stdio:'ignore'});c.on('error',()=>r(false));c.on('close',x=>r(x===0))});
+}
+function attach(id){
+const r=R(id);
+if(r.lp)r.lp.kill();
+if(r.si)r.si.kill();
+const lp=spawn('docker',['logs','-f','--tail','0',nm(id)]);
+r.lp=lp;
+const f=d=>say(id,d.toString());
+lp.stdout.on('data',f);lp.stderr.on('data',f);lp.on('error',()=>{});
+lp.on('close',()=>{if(r.lp===lp)r.lp=null});
+const si=spawn('docker',['attach','--sig-proxy=false',nm(id)],{stdio:['pipe','ignore','ignore']});
+si.on('error',()=>{});si.stdin.on('error',()=>{});
+r.si=si;
+}
+async function start(s){
+const r=R(s.id);
+if(r.state==='running'||r.pending||s.status==='installing')return;
+if(s.suspended){say(s.id,'[panel] Server is suspended');return}
+r.pending='starting';
+try{
+if(!await ensureImage(s.id,s.image)){say(s.id,'[panel] Could not pull image '+s.image);return}
+await run('docker',['rm','-f',nm(s.id)]);
+const e=envOf(s);
+const args=['run','-d','-i','--name',nm(s.id),'-w','/home/container','-v',volOf(s.id)+':/home/container','-e','HOME=/home/container'];
+if(s.cpu>0)args.push('--cpus',String(s.cpu/100));
+if(s.memory>0){
+args.push('--memory',s.memory+'m');
+args.push('--memory-swap',s.swap<0?'-1':(s.memory+s.swap)+'m');
+if(!s.oom)args.push('--oom-kill-disable');
+}
+for(const a of allocsOf(s))for(const p of['tcp','udp'])args.push('-p',`${a.ip}:${a.port}:${a.port}/${p}`);
+args.push(...ownerArgs(s),'--entrypoint','bash',s.image,'-c',fill(s.startup,e));
+say(s.id,'[panel] Starting server ...');
+const x=await run('docker',args);
+if(x.e){say(s.id,'[panel] Start failed: '+x.se);return}
+r.state='running';r.since=Date.now();
+attach(s.id);
+}finally{r.pending=null}
+}
+async function power(s,a){
+const r=R(s.id);
+if(a==='start')return start(s);
+if(a==='stop'){
+if(r.pending)return;
+r.pending='stopping';
+say(s.id,'[panel] Stopping server ...');
+await run('docker',['stop','-t','20',nm(s.id)]);
+r.pending=null;r.state='offline';r.since=0;
+say(s.id,'[panel] Server stopped');
+}
+if(a==='kill'){await run('docker',['kill',nm(s.id)]);r.state='offline';r.since=0;say(s.id,'[panel] Server killed')}
+if(a==='restart'){await power(s,'stop');await start(s)}
+}
+async function install(s){
+const e=eggOf(s);
+s.status='installing';save();
+const dir=volOf(s.id);
+fs.mkdirSync(dir,{recursive:true});
+const sc=e&&e.scripts&&e.scripts.installation;
+if(sc&&sc.script){
+say(s.id,'[panel] Running install script ...');
+await ensureImage(s.id,sc.container);
+const args=['run','--rm','-v',dir+':/mnt/server',...ownerArgs(s),'--entrypoint',sc.entrypoint||'bash',sc.container,'-c',sc.script];
+await new Promise(res=>{const c=spawn('docker',args);const f=d=>say(s.id,d.toString());c.stdout.on('data',f);c.stderr.on('data',f);c.on('error',res);c.on('close',res)});
+}
+own(dir);
+s.status='ready';save();
+say(s.id,'[panel] Install complete');
+}
+async function poll(){
+const ps=await run('docker',['ps','-a','--format','{{.Names}}|{{.State}}']);
+const states={};
+ps.o.split('\n').forEach(l=>{const[n,s]=l.split('|');if(n&&n.startsWith('sp_'))states[n.slice(3)]=s});
+const stats={};
+if(Object.values(states).includes('running')){
+const x=await run('docker',['stats','--no-stream','--format','{{json .}}']);
+x.o.split('\n').forEach(l=>{try{const j=JSON.parse(l);if(j.Name.startsWith('sp_'))stats[j.Name.slice(3)]=j}catch{}});
+}
+for(const s of db.servers){
+const r=R(s.id),ds=states[s.id];
+const prev=r.state;
+r.state=s.status==='installing'?'installing':r.pending||(ds==='running'?'running':'offline');
+if(r.state==='running'&&!r.since)r.since=Date.now();
+if(r.state==='offline')r.since=0;
+if(r.state==='running'&&!r.lp)attach(s.id);
+const j=stats[s.id];
+r.stats=j&&r.state==='running'?{cpu:parseFloat(j.CPUPerc)||0,mem:sz((j.MemUsage||'').split('/')[0]),rx:sz((j.NetIO||'').split('/')[0]),tx:sz((j.NetIO||'').split('/')[1])}:null;
+if(prev==='running'&&r.state==='offline')say(s.id,'[panel] Server process exited');
+emit(s.id,'stats',pub(s.id));
+}
+}
+async function disks(){
+for(const s of db.servers){
+const x=await run('du',['-sk',volOf(s.id)]);
+const r=R(s.id);
+r.disk=(parseInt(x.o)||0)*1024;
+if(s.disk>0&&r.disk>s.disk*1048576&&r.state==='running'){say(s.id,'[panel] Disk limit exceeded, killing server');await power(s,'kill')}
+}
+}
+setInterval(()=>poll().catch(()=>{}),3000);
+setInterval(()=>disks().catch(()=>{}),45000);
+setTimeout(()=>disks().catch(()=>{}),2000);
+const safe=(s,p)=>{
+const base=volOf(s.id);
+const f=path.resolve(base,'.'+path.posix.normalize('/'+(p||'')));
+if(f!==base&&!f.startsWith(base+path.sep))return null;
+try{const rf=fs.realpathSync(fs.existsSync(f)?f:path.dirname(f));const rb=fs.realpathSync(base);if(rf!==rb&&!rf.startsWith(rb+path.sep))return null}catch{return null}
+return f;
+};
+const num=(v,d=0)=>{const n=parseInt(v);return Number.isFinite(n)?n:d};
+const view=s=>{
+const e=eggOf(s);
+return{id:s.id,name:s.name,owner:s.owner,egg:s.egg,eggName:e?e.name:'-',image:s.image,startup:s.startup,vars:s.vars,cpu:s.cpu,memory:s.memory,swap:s.swap,disk:s.disk,oom:s.oom,status:s.status,suspended:!!s.suspended,allocations:allocsOf(s),host:db.settings.host,images:e?e.docker_images:{},variables:e?e.variables:[],...pub(s.id)};
+};
+const pubUser=u=>({id:u.id,email:u.email,username:u.username,admin:!!u.admin});
+const fail=(c,m)=>{throw{c,m}};
+const getS=c=>{const s=db.servers.find(x=>x.id===c.p.id);if(!s||!(c.user.admin||s.owner===c.user.id))fail(404,'Server not found');return s};
+const normEgg=j=>{
+const imgs=j.docker_images||(Array.isArray(j.images)?Object.fromEntries(j.images.map(i=>[i,i])):null);
+if(!j.name||!imgs||!j.startup)fail(400,'Invalid egg: name, docker_images and startup are required');
+return{name:String(j.name),author:j.author||'',description:j.description||'',docker_images:imgs,startup:String(j.startup),variables:(j.variables||[]).map(v=>({name:v.name,description:v.description||'',env_variable:v.env_variable,default_value:v.default_value??'',user_editable:v.user_editable!==false})),scripts:{installation:j.scripts&&j.scripts.installation&&j.scripts.installation.script?{container:j.scripts.installation.container,entrypoint:j.scripts.installation.entrypoint||'bash',script:j.scripts.installation.script}:null}};
+};
+function applyDomain(){
+const d=db.settings.domain;
+try{
+if(d&&/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)){fs.writeFileSync('/etc/caddy/Caddyfile',`${d} {\n\treverse_proxy 127.0.0.1:${CFG.port}\n}\n`);exec('systemctl enable caddy && systemctl restart caddy',()=>{})}
+else exec('systemctl stop caddy && systemctl disable caddy',()=>{});
+}catch(e){console.error('applyDomain error',e.message)}
+}
+const routes=[];
+const add=(m,p,h,admin)=>routes.push({m,re:new RegExp('^'+p.replace(/:(\w+)/g,'(?<$1>[^/]+)')+'$'),h,admin});
+add('POST','/api/login',async c=>{
+const b=await c.json();
+const u=db.users.find(x=>x.email.toLowerCase()===String(b.email||'').toLowerCase());
+if(!u||!checkPw(String(b.password||''),u.password))fail(401,'Wrong email or password');
+return{token:sign({u:u.id,exp:Date.now()+7*864e5}),user:pubUser(u),name:db.settings.name};
+});
+add('GET','/api/me',async c=>({user:pubUser(c.user),name:db.settings.name}));
+add('PUT','/api/me',async c=>{
+const b=await c.json();
+if(!checkPw(String(b.current||''),c.user.password))fail(403,'Current password is wrong');
+if(b.email){if(db.users.some(x=>x.id!==c.user.id&&x.email.toLowerCase()===b.email.toLowerCase()))fail(400,'Email already used');c.user.email=b.email}
+if(b.username)c.user.username=b.username;
+if(b.password){if(b.password.length<6)fail(400,'Password too short');c.user.password=hashPw(b.password)}
+save();return pubUser(c.user);
+});
+add('GET','/api/servers',async c=>db.servers.filter(s=>c.user.admin&&c.q.all==='1'||s.owner===c.user.id).map(view));
+add('GET','/api/servers/:id',async c=>view(getS(c)));
+add('PUT','/api/servers/:id',async c=>{
+const s=getS(c),b=await c.json(),e=eggOf(s);
+if(b.name)s.name=String(b.name).slice(0,60);
+if(b.image&&e&&Object.values(e.docker_images).includes(b.image))s.image=b.image;
+if(typeof b.startup==='string'&&b.startup.trim())s.startup=b.startup;
+if(b.vars&&e)for(const v of e.variables)if(v.user_editable!==false&&b.vars[v.env_variable]!==undefined)s.vars[v.env_variable]=String(b.vars[v.env_variable]);
+save();act(s.id,c.user.email,'server.update');return view(s);
+});
+add('POST','/api/servers/:id/power',async c=>{
+const s=getS(c),b=await c.json();
+if(!['start','stop','restart','kill'].includes(b.action))fail(400,'Bad action');
+act(s.id,c.user.email,'power.'+b.action);
+power(s,b.action).catch(()=>{});
+return{ok:true};
+});
+add('POST','/api/servers/:id/command',async c=>{
+const s=getS(c),b=await c.json(),r=R(s.id);
+if(r.state!=='running'||!r.si||!r.si.stdin.writable)fail(409,'Server is not running');
+r.si.stdin.write(String(b.cmd||'')+'\n');
+return{ok:true};
+});
+add('GET','/api/servers/:id/stream',async c=>{
+const s=getS(c),r=R(s.id),res=c.res;
+res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive','X-Accel-Buffering':'no'});
+exec(`docker logs --tail 250 ${nm(s.id)} 2>&1`,{maxBuffer:1<<24},(e,o)=>{
+res.write(`event: log\ndata: ${JSON.stringify(e?'':o)}\n\n`);
+res.write(`event: stats\ndata: ${JSON.stringify(pub(s.id))}\n\n`);
+});
+r.subs.add(res);
+const ka=setInterval(()=>res.write(': ka\n\n'),20000);
+c.req.on('close',()=>{clearInterval(ka);r.subs.delete(res)});
+c.raw=true;
+});
+add('POST','/api/servers/:id/reinstall',async c=>{
+const s=getS(c);
+if(R(s.id).state!=='offline')fail(409,'Stop the server first');
+act(s.id,c.user.email,'server.reinstall');
+install(s).catch(()=>{});
+return{ok:true};
+});
+add('GET','/api/servers/:id/activity',async c=>db.activity.filter(a=>a.s===c.p.id).slice(0,100));
+add('GET','/api/servers/:id/files',async c=>{
+const s=getS(c),d=safe(s,c.q.path);
+if(!d||!fs.existsSync(d))fail(404,'Not found');
+return fs.readdirSync(d,{withFileTypes:true}).map(e=>{
+let st={};try{st=fs.statSync(path.join(d,e.name))}catch{}
+return{name:e.name,dir:e.isDirectory(),size:st.size||0,mtime:st.mtimeMs||0};
+}).sort((a,b)=>b.dir-a.dir||a.name.localeCompare(b.name));
+});
+add('GET','/api/servers/:id/files/read',async c=>{
+const s=getS(c),f=safe(s,c.q.path);
+if(!f||!fs.existsSync(f)||fs.statSync(f).isDirectory())fail(404,'Not found');
+if(fs.statSync(f).size>5*1048576)fail(413,'File too large to edit');
+c.res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8'});c.res.end(fs.readFileSync(f));c.raw=true;
+});
+add('PUT','/api/servers/:id/files/write',async c=>{
+const s=getS(c),f=safe(s,c.q.path);
+if(!f)fail(400,'Bad path');
+fs.mkdirSync(path.dirname(f),{recursive:true});
+fs.writeFileSync(f,await c.buf());own(f);
+act(s.id,c.user.email,'file.write',c.q.path);
+return{ok:true};
+});
+add('POST','/api/servers/:id/files/mkdir',async c=>{
+const s=getS(c),b=await c.json(),f=safe(s,b.path);
+if(!f)fail(400,'Bad path');
+fs.mkdirSync(f,{recursive:true});own(f);return{ok:true};
+});
+add('POST','/api/servers/:id/files/delete',async c=>{
+const s=getS(c),b=await c.json();
+for(const p of b.paths||[]){const f=safe(s,p);if(f&&f!==volOf(s.id))fs.rmSync(f,{recursive:true,force:true})}
+act(s.id,c.user.email,'file.delete',(b.paths||[]).join(', '));
+return{ok:true};
+});
+add('POST','/api/servers/:id/files/rename',async c=>{
+const s=getS(c),b=await c.json(),a=safe(s,b.from),t=safe(s,b.to);
+if(!a||!t)fail(400,'Bad path');
+fs.renameSync(a,t);return{ok:true};
+});
+add('POST','/api/servers/:id/files/upload',async c=>{
+const s=getS(c),d=safe(s,c.q.path),n=path.basename(c.q.name||'');
+if(!d||!n)fail(400,'Bad path');
+const f=path.join(d,n);
+fs.writeFileSync(f,await c.buf());own(f);
+act(s.id,c.user.email,'file.upload',n);
+return{ok:true};
+});
+add('GET','/api/servers/:id/files/download',async c=>{
+const s=getS(c),f=safe(s,c.q.path);
+if(!f||!fs.existsSync(f)||fs.statSync(f).isDirectory())fail(404,'Not found');
+c.res.writeHead(200,{'Content-Disposition':`attachment; filename="${path.basename(f)}"`,'Content-Type':'application/octet-stream'});
+fs.createReadStream(f).pipe(c.res);c.raw=true;
+});
+add('POST','/api/servers/:id/files/extract',async c=>{
+const s=getS(c),b=await c.json(),f=safe(s,b.path);
+if(!f)fail(400,'Bad path');
+const d=path.dirname(f);
+const x=/\.zip$/i.test(f)?await run('unzip',['-o',f,'-d',d]):await run('tar',['-xf',f,'-C',d]);
+own(d);
+if(x.e)fail(400,'Extract failed: '+x.se.slice(0,200));
+return{ok:true};
+});
+const bkDir=s=>{const d=path.join(BK,s.id);fs.mkdirSync(d,{recursive:true});return d};
+add('GET','/api/servers/:id/backups',async c=>{
+const s=getS(c),d=bkDir(s);
+return fs.readdirSync(d).map(n=>{const st=fs.statSync(path.join(d,n));return{name:n,size:st.size,time:st.mtimeMs}}).sort((a,b)=>b.time-a.time);
+});
+add('POST','/api/servers/:id/backups',async c=>{
+const s=getS(c),d=bkDir(s);
+if(fs.readdirSync(d).length>=10)fail(400,'Backup limit reached (10)');
+const n=new Date().toISOString().replace(/[:.]/g,'-')+'.tar.gz';
+const x=await run('tar',['-czf',path.join(d,n),'-C',volOf(s.id),'.']);
+if(x.e)fail(500,'Backup failed');
+act(s.id,c.user.email,'backup.create',n);return{ok:true};
+});
+const bkName=c=>{const n=c.p.name;if(!/^[\w.-]+$/.test(n))fail(400,'Bad name');return n};
+add('GET','/api/servers/:id/backups/:name',async c=>{
+const s=getS(c),f=path.join(bkDir(s),bkName(c));
+if(!fs.existsSync(f))fail(404,'Not found');
+c.res.writeHead(200,{'Content-Disposition':`attachment; filename="${c.p.name}"`,'Content-Type':'application/gzip'});
+fs.createReadStream(f).pipe(c.res);c.raw=true;
+});
+add('POST','/api/servers/:id/backups/:name/restore',async c=>{
+const s=getS(c),f=path.join(bkDir(s),bkName(c));
+if(R(s.id).state!=='offline')fail(409,'Stop the server first');
+if(!fs.existsSync(f))fail(404,'Not found');
+const v=volOf(s.id);
+fs.readdirSync(v).forEach(n=>fs.rmSync(path.join(v,n),{recursive:true,force:true}));
+await run('tar',['-xzf',f,'-C',v]);own(v);
+act(s.id,c.user.email,'backup.restore',c.p.name);return{ok:true};
+});
+add('DELETE','/api/servers/:id/backups/:name',async c=>{
+const s=getS(c);
+fs.rmSync(path.join(bkDir(s),bkName(c)),{force:true});return{ok:true};
+});
+add('GET','/api/admin/overview',async c=>({users:db.users.length,servers:db.servers.length,eggs:db.eggs.length,allocations:db.allocations.length,free:db.allocations.filter(a=>!a.server).length,running:db.servers.filter(s=>R(s.id).state==='running').length,docker:(await run('docker',['version','--format','{{.Server.Version}}'])).o||'not available',host:db.settings.host}),true);
+add('GET','/api/admin/users',async c=>db.users.map(u=>({...pubUser(u),servers:db.servers.filter(s=>s.owner===u.id).length})),true);
+add('POST','/api/admin/users',async c=>{
+const b=await c.json();
+if(!b.email||!b.password||b.password.length<6)fail(400,'Email and password (6+ chars) required');
+if(db.users.some(x=>x.email.toLowerCase()===b.email.toLowerCase()))fail(400,'Email already used');
+db.users.push({id:uid(),email:b.email,username:b.username||b.email.split('@')[0],password:hashPw(b.password),admin:!!b.admin});
+save();return{ok:true};
+},true);
+add('PUT','/api/admin/users/:id',async c=>{
+const u=db.users.find(x=>x.id===c.p.id),b=await c.json();
+if(!u)fail(404,'Not found');
+if(b.email)u.email=b.email;
+if(b.username)u.username=b.username;
+if(b.password){if(b.password.length<6)fail(400,'Password too short');u.password=hashPw(b.password)}
+if(typeof b.admin==='boolean'&&u.id!==c.user.id)u.admin=b.admin;
+save();return{ok:true};
+},true);
+add('DELETE','/api/admin/users/:id',async c=>{
+if(c.p.id===c.user.id)fail(400,'You cannot delete yourself');
+if(db.servers.some(s=>s.owner===c.p.id))fail(400,'User still owns servers');
+db.users=db.users.filter(u=>u.id!==c.p.id);save();return{ok:true};
+},true);
+add('GET','/api/admin/users/:id/servers',async c=>{
+const u=db.users.find(x=>x.id===c.p.id);
+if(!u)fail(404,'User not found');
+return db.servers.filter(s=>s.owner===u.id).map(view);
+},true);
+add('GET','/api/admin/eggs',async c=>db.eggs,true);
+add('POST','/api/admin/eggs',async c=>{
+const b=await c.json();
+const j=typeof b.json==='string'?JSON.parse(b.json):b.json;
+db.eggs.push({id:uid(),...normEgg(j)});save();return{ok:true};
+},true);
+add('PUT','/api/admin/eggs/:id',async c=>{
+const i=db.eggs.findIndex(e=>e.id===c.p.id),b=await c.json();
+if(i<0)fail(404,'Not found');
+const j=typeof b.json==='string'?JSON.parse(b.json):b.json;
+db.eggs[i]={id:c.p.id,...normEgg(j)};save();return{ok:true};
+},true);
+add('DELETE','/api/admin/eggs/:id',async c=>{
+if(db.servers.some(s=>s.egg===c.p.id))fail(400,'Egg is used by servers');
+db.eggs=db.eggs.filter(e=>e.id!==c.p.id);save();return{ok:true};
+},true);
+add('GET','/api/admin/allocations',async c=>db.allocations.map(a=>({...a,serverName:(db.servers.find(s=>s.id===a.server)||{}).name})),true);
+add('POST','/api/admin/allocations',async c=>{
+const b=await c.json(),a=num(b.start),z=num(b.end,a),ip=b.ip||'0.0.0.0';
+if(a<1||z>65535||z<a||z-a>2000)fail(400,'Bad port range');
+for(let p=a;p<=z;p++)if(!db.allocations.some(x=>x.ip===ip&&x.port===p))db.allocations.push({id:uid(),ip,port:p,server:null});
+save();return{ok:true};
+},true);
+add('DELETE','/api/admin/allocations/:id',async c=>{
+const a=db.allocations.find(x=>x.id===c.p.id);
+if(a&&a.server)fail(400,'Allocation is in use');
+db.allocations=db.allocations.filter(x=>x.id!==c.p.id);save();return{ok:true};
+},true);
+const applyServer=(s,b,creating)=>{
+const e=db.eggs.find(x=>x.id===(creating?b.egg:s.egg));
+if(!e)fail(400,'Egg not found');
+if(!b.name)fail(400,'Name required');
+if(!db.users.some(u=>u.id===b.owner))fail(400,'Owner not found');
+s.name=String(b.name).slice(0,60);s.owner=b.owner;
+s.cpu=Math.max(0,num(b.cpu));s.memory=Math.max(0,num(b.memory));s.swap=num(b.swap);s.disk=Math.max(0,num(b.disk));s.oom=!!b.oom;
+if(!s.oom&&s.memory===0)fail(400,'OOM killer can only be disabled with a memory limit');
+const imgs=Object.values(e.docker_images);
+s.image=imgs.includes(b.image)?b.image:imgs[0];
+s.startup=b.startup&&b.startup.trim()?b.startup:e.startup;
+s.vars={};
+for(const v of e.variables)s.vars[v.env_variable]=String((b.vars||{})[v.env_variable]??v.default_value??'');
+};
+add('POST','/api/admin/servers',async c=>{
+const b=await c.json();
+const s={id:uid(),egg:b.egg,status:'installing',suspended:false};
+applyServer(s,b,true);
+const al=db.allocations.find(a=>a.id===b.allocation&&!a.server);
+if(!al)fail(400,'Select a free allocation');
+al.server=s.id;al.primary=true;
+db.servers.push(s);save();
+act(s.id,c.user.email,'server.create',s.name);
+install(s).catch(()=>{});
+return view(s);
+},true);
+add('PUT','/api/admin/servers/:id',async c=>{
+const s=db.servers.find(x=>x.id===c.p.id);
+if(!s)fail(404,'Not found');
+applyServer(s,await c.json(),false);
+save();act(s.id,c.user.email,'server.edit');return view(s);
+},true);
+add('POST','/api/admin/servers/:id/suspend',async c=>{
+const s=db.servers.find(x=>x.id===c.p.id),b=await c.json();
+if(!s)fail(404,'Not found');
+s.suspended=!!b.suspend;save();
+if(s.suspended)power(s,'kill').catch(()=>{});
+return{ok:true};
+},true);
+add('DELETE','/api/admin/servers/:id',async c=>{
+const s=db.servers.find(x=>x.id===c.p.id);
+if(!s)fail(404,'Not found');
+await run('docker',['rm','-f',nm(s.id)]);
+fs.rmSync(volOf(s.id),{recursive:true,force:true});
+fs.rmSync(path.join(BK,s.id),{recursive:true,force:true});
+db.allocations.forEach(a=>{if(a.server===s.id){a.server=null;delete a.primary}});
+db.servers=db.servers.filter(x=>x.id!==s.id);
+delete rt[s.id];save();return{ok:true};
+},true);
+add('GET','/api/admin/settings',async c=>({...db.settings,port:CFG.port}),true);
+add('PUT','/api/admin/settings',async c=>{
+const b=await c.json();
+if(b.name)db.settings.name=String(b.name).slice(0,40);
+if(typeof b.host==='string')db.settings.host=b.host.trim();
+if(typeof b.domain==='string'){
+const d=b.domain.trim().toLowerCase();
+if(d&&!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))fail(400,'Invalid domain');
+if(d!==db.settings.domain){db.settings.domain=d;applyDomain()}
+}
+save();return db.settings;
+},true);
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon'};
+const server=http.createServer(async(req,res)=>{
+const u=new URL(req.url,'http://x'),q=Object.fromEntries(u.searchParams);
+const send=(c,d)=>{res.writeHead(c,{'Content-Type':'application/json'});res.end(JSON.stringify(d))};
+if(!u.pathname.startsWith('/api/')){
+let f=path.join(PUB,u.pathname==='/'?'index.html':u.pathname);
+if(!f.startsWith(PUB)||!fs.existsSync(f)||fs.statSync(f).isDirectory())f=path.join(PUB,'index.html');
+res.writeHead(200,{'Content-Type':MIME[path.extname(f)]||'application/octet-stream'});
+return fs.createReadStream(f).pipe(res);
+}
+try{
+for(const r of routes){
+if(r.m!==req.method)continue;
+const m=r.re.exec(u.pathname);
+if(!m)continue;
+const ctx={req,res,q,p:m.groups||{},user:null,raw:false};
+const rb=()=>new Promise((ok,no)=>{const a=[];let n=0;req.on('data',d=>{n+=d.length;if(n>600*1048576){no({c:413,m:'Too large'});req.destroy()}else a.push(d)});req.on('end',()=>ok(Buffer.concat(a)));req.on('error',no)});
+ctx.buf=rb;
+ctx.json=async()=>{try{return JSON.parse((await rb()).toString()||'{}')}catch{fail(400,'Invalid JSON')}};
+if(u.pathname!=='/api/login'){
+const h=req.headers.authorization||'';
+ctx.user=verify(h.startsWith('Bearer ')?h.slice(7):q.t);
+if(!ctx.user)return send(401,{error:'Unauthorized'});
+if(r.admin&&!ctx.user.admin)return send(403,{error:'Admins only'});
+}
+const out=await r.h(ctx);
+if(!ctx.raw)send(200,out===undefined?{ok:true}:out);
+return;
+}
+send(404,{error:'Not found'});
+}catch(e){
+if(res.headersSent)return res.end();
+send(e.c||500,{error:e.m||String(e.message||e)});
+}
+});
+server.listen(CFG.port,'0.0.0.0',()=>console.log('NEXOR HOSTING listening on '+CFG.port));
+SERVEREOF
+cat > $APP/public/index.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SayPanel v3</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0c16">
+<title>NEXOR HOSTING v1</title>
+<link rel="icon" href="data:image/webp;base64,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">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0d0d0f;--surface:#141416;--surface2:#1a1a1d;--surface3:#212124;
-  --border:#2a2a2e;--border2:#333337;
-  --text:#e8e8ec;--muted:#6b6b72;--muted2:#4a4a52;
-  --accent:#6366f1;--accent2:#818cf8;--accent-dim:#6366f120;
-  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--blue:#3b82f6;
-  --green-dim:#22c55e18;--red-dim:#ef444418;--yellow-dim:#f59e0b18;
-  --mono:'JetBrains Mono','Fira Mono','Courier New',monospace;
-  --radius:8px;--radius2:12px;
-}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
+:root{--bg:#070914;--s1:rgba(20,24,42,.66);--s2:rgba(30,35,60,.7);--bd:rgba(255,255,255,.08);--tx:#e8ebf7;--mu:#8e97b5;--ac:#7c6cff;--ac2:#33d6c3;--rd:#ff5d73;--gn:#3ddc97;--yl:#ffc857;--r:16px;--mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html,body{min-height:100%;background:var(--bg);color:var(--tx);font:15px/1.5 'Outfit',system-ui,sans-serif}
+body{background:radial-gradient(900px 500px at 8% -8%,rgba(124,108,255,.22),transparent 60%),radial-gradient(800px 480px at 100% 0,rgba(51,214,195,.13),transparent 60%),radial-gradient(700px 500px at 50% 110%,rgba(124,108,255,.12),transparent 60%),var(--bg);background-attachment:fixed;padding-bottom:env(safe-area-inset-bottom)}
 a{color:inherit;text-decoration:none}
-button{cursor:pointer;font-family:inherit;font-size:13px;border:none;outline:none}
-input,textarea,select{font-family:inherit;font-size:13px;outline:none;border:none}
-
-.hidden{display:none!important}
-
-.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:radial-gradient(ellipse at 50% 0%,#1a1040 0%,var(--bg) 70%)}
-.login-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:36px 32px}
-.login-logo{display:flex;align-items:center;gap:10px;margin-bottom:28px}
-.login-logo-icon{width:36px;height:36px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:#fff}
-.login-logo-text{font-size:18px;font-weight:700;letter-spacing:-.3px}
-.login-sub{font-size:12px;color:var(--muted);margin-top:2px}
-.login-title{font-size:22px;font-weight:700;margin-bottom:4px}
-.login-desc{font-size:13px;color:var(--muted);margin-bottom:24px}
-.form-group{margin-bottom:16px}
-.form-label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:6px;letter-spacing:.3px;text-transform:uppercase}
-.form-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);transition:border-color .15s}
-.form-input:focus{border-color:var(--accent)}
-.form-textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);resize:vertical;min-height:80px;transition:border-color .15s}
-.form-textarea:focus{border-color:var(--accent)}
-.form-select{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;color:var(--text);cursor:pointer}
-.form-select:focus{border-color:var(--accent)}
-.login-err{background:var(--red-dim);border:1px solid #ef444430;border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:16px;display:none}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);font-weight:500;transition:all .15s}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent2)}
-.btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.btn-ghost:hover{background:var(--surface3);border-color:var(--border2)}
-.btn-danger{background:var(--red-dim);color:var(--red);border:1px solid #ef444430}
-.btn-danger:hover{background:#ef444425}
-.btn-full{width:100%;justify-content:center}
-.btn-sm{padding:6px 12px;font-size:12px}
-
-.layout{display:flex;height:100vh;overflow:hidden}
-.sidebar{width:220px;min-width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh}
-.sidebar-logo{padding:18px 16px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
-.sidebar-logo-icon{width:30px;height:30px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
-.sidebar-logo-text{font-size:15px;font-weight:700;letter-spacing:-.3px}
-.sidebar-nav{flex:1;padding:12px 8px;overflow-y:auto}
-.nav-section{font-size:10px;font-weight:600;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;padding:8px 8px 4px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius);cursor:pointer;color:var(--muted);font-size:13px;font-weight:500;transition:all .15s;margin-bottom:2px}
-.nav-item:hover{background:var(--surface2);color:var(--text)}
-.nav-item.active{background:var(--accent-dim);color:var(--accent2)}
-.nav-item svg{flex-shrink:0}
-.sidebar-footer{padding:12px;border-top:1px solid var(--border)}
-.user-card{background:var(--surface2);border-radius:var(--radius);padding:10px 12px;display:flex;align-items:center;gap:10px}
-.user-avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-dim);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--accent2);flex-shrink:0}
-.user-info{flex:1;min-width:0}
-.user-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.user-role{font-size:10px;color:var(--muted);letter-spacing:.3px}
-.icon-btn-sm{background:none;color:var(--muted);border-radius:4px;padding:3px;transition:color .15s}
-.icon-btn-sm:hover{color:var(--text)}
-
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-.topbar{height:52px;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--surface)}
-.page-title{font-size:16px;font-weight:700}
-.page-sub{font-size:12px;color:var(--muted);margin-top:1px}
-.topbar-right{display:flex;align-items:center;gap:10px}
-.conn-pill{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:11px;color:var(--muted)}
-.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.dot.green{background:var(--green)}
-.dot.red{background:var(--red)}
-.dot.yellow{background:var(--yellow)}
-
-.content{flex:1;overflow-y:auto;padding:24px}
-.page{display:none}
-.page.active{display:block}
-
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-@media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}}
-@media(max-width:600px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}}
-
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);overflow:hidden}
-.card-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px}
-.card-head-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
-.card-body{padding:16px}
-
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:18px}
-.stat-label{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:.3px;text-transform:uppercase;margin-bottom:8px}
-.stat-val{font-size:28px;font-weight:700;letter-spacing:-1px}
-.stat-val.green{color:var(--green)}
-.stat-val.red{color:var(--red)}
-.stat-val.yellow{color:var(--yellow)}
-.stat-val.accent{color:var(--accent2)}
-
-.server-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
-.server-row:last-child{border-bottom:none}
-.srv-ico{width:32px;height:32px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted)}
-.srv-info{flex:1;min-width:0}
-.srv-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.srv-meta{font-size:11px;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
-.srv-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.icon-btn{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--muted);transition:all .15s;display:flex;align-items:center}
-.icon-btn:hover{background:var(--surface3);color:var(--text);border-color:var(--border2)}
-.icon-btn.start:hover{background:var(--green-dim);color:var(--green);border-color:#22c55e30}
-.icon-btn.stop-btn:hover{background:var(--red-dim);color:var(--red);border-color:#ef444430}
-.icon-btn.log-btn:hover{background:var(--yellow-dim);color:var(--yellow);border-color:#f59e0b30}
-.icon-btn.del:hover{background:var(--red-dim);color:var(--red);border-color:#ef444430}
-
-.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:500;flex-shrink:0}
-.badge-green{background:var(--green-dim);color:var(--green)}
-.badge-red{background:var(--red-dim);color:var(--red)}
-.badge-yellow{background:var(--yellow-dim);color:var(--yellow)}
-.badge-blue{background:#3b82f618;color:var(--blue)}
-.badge-purple{background:var(--accent-dim);color:var(--accent2)}
-
-.bar-wrap{flex:1;height:5px;background:var(--surface2);border-radius:10px;overflow:hidden}
-.bar-fill{height:100%;border-radius:10px;transition:width .3s}
-.bar-blue{background:var(--blue)}
-.bar-green{background:var(--green)}
-.bar-red{background:var(--red)}
-.sys-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.sys-label{font-size:11px;color:var(--muted);width:36px;flex-shrink:0}
-.sys-val{font-size:11px;color:var(--text);width:36px;text-align:right;flex-shrink:0}
-.mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
-.mini-stat{background:var(--surface2);border-radius:6px;padding:8px 10px;text-align:center}
-.mini-val{font-size:16px;font-weight:700}
-.mini-lbl{font-size:10px;color:var(--muted);margin-top:1px}
-
-.console-wrap{background:#0a0a0c;border-radius:var(--radius);padding:14px;font-family:var(--mono);font-size:12px;line-height:1.6;color:#c0c0c8;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-
-.search-bar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-.search-input-wrap{position:relative;flex:1;min-width:160px}
-.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
-.search-input-wrap .form-input{padding-left:32px}
-
-.empty-state{text-align:center;padding:40px 20px}
-.e-ico{color:var(--muted2);margin-bottom:12px}
-.e-title{font-size:14px;font-weight:600;color:var(--muted);margin-bottom:4px}
-.e-sub{font-size:12px;color:var(--muted2)}
-
-.table{width:100%;border-collapse:collapse}
-.table th{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border)}
-.table td{padding:11px 12px;border-bottom:1px solid var(--border);font-size:13px}
-.table tr:last-child td{border-bottom:none}
-.table tr:hover td{background:var(--surface2)}
-
-.modal-overlay{position:fixed;inset:0;background:#00000080;display:none;align-items:center;justify-content:center;z-index:1000;padding:20px}
-.modal-overlay.open{display:flex}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:24px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto}
-.modal-wide{max-width:680px}
-.modal-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:20px}
-.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
-.env-row{display:flex;gap:8px;margin-bottom:8px}
-.env-add{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--accent2);cursor:pointer;padding:4px 0;width:fit-content}
-.env-add:hover{color:var(--accent)}
-.settings-title{font-size:14px;font-weight:700;margin-bottom:16px}
-.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
-.setting-row:last-child{border-bottom:none}
-.setting-info{flex:1}
-.setting-name{font-size:13px;font-weight:500}
-.setting-desc{font-size:12px;color:var(--muted);margin-top:2px}
-.code-block{background:#0a0a0c;border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:var(--mono);font-size:12px;line-height:1.8;color:#c0c0c8}
-.cm{color:var(--muted2)}
-.cv{color:var(--green)}
-
-.assign-list{display:flex;flex-wrap:wrap;gap:6px;padding:8px 0}
-.assign-chip{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;transition:all .15s}
-.assign-chip.selected{background:var(--accent-dim);border-color:var(--accent);color:var(--accent2)}
-.assign-chip:hover{border-color:var(--border2)}
-
-#toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-size:13px;min-width:260px;animation:tIn .25s ease;box-shadow:0 8px 24px #00000060}
-.toast.success{border-color:#22c55e40;background:#22c55e08}
-.toast.error{border-color:#ef444440;background:#ef444408}
-.toast.info{border-color:#3b82f640;background:#3b82f608}
-.t-ico{flex-shrink:0}
-.t-ico.success{color:var(--green)}.t-ico.error{color:var(--red)}.t-ico.info{color:var(--blue)}
-@keyframes tIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-@keyframes tOut{from{opacity:1}to{opacity:0}}
-
-.log-modal-wrap{background:#0a0a0c;border-radius:var(--radius);padding:14px;font-family:var(--mono);font-size:12px;line-height:1.6;color:#c0c0c8;height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px}
-::-webkit-scrollbar-thumb:hover{background:var(--muted2)}
+button,input,select,textarea{font:inherit;color:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:calc(10px + env(safe-area-inset-top)) 20px 10px;background:rgba(9,11,22,.78);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--bd)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;letter-spacing:.2px}
+.logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:grid;place-items:center;box-shadow:0 6px 20px rgba(124,108,255,.4)}
+.nav{display:flex;gap:4px;margin-left:auto;align-items:center}
+.nav a,.nav button{padding:8px 14px;border-radius:12px;background:none;border:0;color:var(--mu);cursor:pointer;font-weight:500}
+.nav a:hover,.nav button:hover,.nav a.on{color:var(--tx);background:rgba(255,255,255,.07)}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
+.tabs{display:flex;gap:4px;overflow-x:auto;margin:16px 0 20px;padding-bottom:2px;border-bottom:1px solid var(--bd);scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{padding:10px 16px;color:var(--mu);white-space:nowrap;border-bottom:2px solid transparent;font-weight:500}
+.tabs a.on{color:var(--tx);border-color:var(--ac)}
+.tabs a:hover{color:var(--tx)}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 10px 40px rgba(0,0,0,.28)}
+.pad{padding:18px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+h1{font-size:24px;font-weight:700}h2{font-size:17px;font-weight:600;margin-bottom:12px}
+.mu{color:var(--mu)}.mono{font-family:var(--mono);font-size:13px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp{justify-content:space-between}
+.btn{border:1px solid var(--bd);background:rgba(255,255,255,.06);padding:9px 16px;border-radius:12px;cursor:pointer;font-weight:500;transition:.15s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.11)}
+.btn.p{background:linear-gradient(135deg,var(--ac),#5b8cff);border-color:transparent;box-shadow:0 6px 20px rgba(124,108,255,.35)}
+.btn.d{background:rgba(255,93,115,.16);border-color:rgba(255,93,115,.35);color:#ffb3be}
+.btn.g{background:rgba(61,220,151,.16);border-color:rgba(61,220,151,.35);color:#9cf0cb}
+.btn.s{padding:6px 11px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+input,select,textarea{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--bd);border-radius:12px;padding:10px 13px;outline:0}
+input:focus,select:focus,textarea:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(124,108,255,.2)}
+select option{background:#14172a}
+textarea{resize:vertical;min-height:90px;font-family:var(--mono);font-size:13px}
+label{display:block;font-size:13px;color:var(--mu);margin:0 0 5px 2px}
+.f{margin-bottom:13px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:600;background:rgba(255,255,255,.07)}
+.badge i{width:7px;height:7px;border-radius:50%;background:var(--mu)}
+.running i{background:var(--gn);box-shadow:0 0 8px var(--gn)}.starting i,.installing i,.stopping i{background:var(--yl)}.offline i{background:var(--rd)}
+.srv{display:block;padding:16px;transition:.18s;position:relative;overflow:hidden}
+.srv:hover{transform:translateY(-2px);border-color:rgba(124,108,255,.5)}
+.srv .st{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.srv .st div{background:rgba(0,0,0,.25);border-radius:11px;padding:8px 10px}
+.srv .st b{display:block;font-size:14px;font-weight:600}.srv .st span{font-size:11px;color:var(--mu)}
+.stat{padding:14px 16px;display:flex;gap:12px;align-items:center}
+.ico{width:38px;height:38px;border-radius:12px;background:rgba(124,108,255,.18);display:grid;place-items:center;font-size:17px;flex:none}
+.stat small{display:block;color:var(--mu);font-size:12px}.stat b{font-weight:600;font-size:15px;word-break:break-all}
+.term{background:#05060d;border:1px solid var(--bd);border-radius:14px;overflow:hidden}
+.term pre{height:min(56vh,460px);overflow:auto;padding:14px;font:12.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-all;color:#cfd5ee}
+.term form{display:flex;border-top:1px solid var(--bd)}
+.term input{border:0;border-radius:0;background:transparent;font-family:var(--mono);font-size:13px}
+.term input:focus{box-shadow:none}
+table{width:100%;border-collapse:collapse}
+td,th{padding:11px 12px;text-align:left;border-bottom:1px solid var(--bd);font-size:14px}
+th{color:var(--mu);font-weight:500;font-size:12px}
+tr:last-child td{border:0}
+.scroll{overflow-x:auto}
+.fr{cursor:pointer}.fr:hover{background:rgba(255,255,255,.04)}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(3,4,10,.7);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding:4vh 14px;overflow:auto}
+.modal .card{width:100%;max-width:640px;background:rgba(16,19,36,.96);padding:22px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:99;padding:11px 20px;border-radius:13px;background:rgba(18,22,40,.95);border:1px solid var(--bd);box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:90vw}
+.toast.e{border-color:var(--rd);color:#ffb3be}.toast.o{border-color:var(--gn)}
+.login{min-height:100vh;display:grid;place-items:center;padding:20px}
+.login .card{width:100%;max-width:400px;padding:30px}
+.sw{position:relative;width:46px;height:26px;flex:none}
+.sw input{opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer;z-index:2}
+.sw span{position:absolute;inset:0;border-radius:99px;background:rgba(255,255,255,.14);transition:.2s}
+.sw span:after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+.sw input:checked+span{background:var(--ac)}.sw input:checked+span:after{transform:translateX(20px)}
+svg.sp{width:100%;height:64px;display:block}
+.bar{height:6px;border-radius:9px;background:rgba(255,255,255,.08);overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),var(--ac2))}
+@media(max-width:720px){.top{padding-left:12px;padding-right:12px}.brand span{display:none}.nav a,.nav button{padding:8px 10px;font-size:14px}.wrap{padding:16px 12px 50px}.modal .card{padding:16px}.hide-m{display:none}h1{font-size:21px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-
-<div id="login-screen" class="login-wrap">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="login-logo-icon">S</div>
-      <div>
-        <div class="login-logo-text">SayPanel</div>
-        <div class="login-sub">v3.0 PREMIUM</div>
-      </div>
-    </div>
-    <div class="login-title">Welcome back</div>
-    <div class="login-desc">Sign in to your panel</div>
-    <div id="login-err" class="login-err"></div>
-    <div class="form-group">
-      <label class="form-label">Email</label>
-      <input class="form-input" id="login-email" type="email" placeholder="admin@example.com" autocomplete="email">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Password</label>
-      <input class="form-input" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <button class="btn btn-primary btn-full" onclick="doLogin()">Sign In</button>
-  </div>
-</div>
-
-<div id="main-layout" class="layout" style="display:none">
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-icon">S</div>
-      <div class="sidebar-logo-text">SayPanel</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section">Panel</div>
-      <div class="nav-item active" onclick="showPage('dashboard')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Dashboard
-      </div>
-      <div class="nav-item" onclick="showPage('servers')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-        Servers
-      </div>
-      <div class="nav-item" onclick="showPage('console')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        Console
-      </div>
-      <div class="nav-section" id="nav-admin-section" style="display:none">Admin</div>
-      <div class="nav-item" id="nav-users" style="display:none" onclick="showPage('users')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-        Users
-      </div>
-      <div class="nav-section">System</div>
-      <div class="nav-item" onclick="showPage('settings')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Settings
-      </div>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="user-card">
-        <div class="user-avatar" id="sidebar-avatar">A</div>
-        <div class="user-info">
-          <div class="user-name" id="sidebar-name">Loading...</div>
-          <div class="user-role" id="sidebar-role">—</div>
-        </div>
-        <button class="icon-btn-sm" onclick="doLogout()" title="Logout">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
-      </div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="topbar">
-      <div>
-        <div class="page-title" id="page-title">Dashboard</div>
-        <div class="page-sub" id="page-sub">Overview</div>
-      </div>
-      <div class="topbar-right">
-        <div class="conn-pill">
-          <span class="dot yellow" id="conn-dot"></span>
-          <span id="conn-label">Connecting...</span>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="refreshAll()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          Refresh
-        </button>
-      </div>
-    </div>
-
-    <div class="content">
-
-      <div id="page-dashboard" class="page active">
-        <div class="grid-4" style="margin-bottom:16px">
-          <div class="stat-card"><div class="stat-label">Total Servers</div><div class="stat-val accent" id="s-total">—</div></div>
-          <div class="stat-card"><div class="stat-label">Running</div><div class="stat-val green" id="s-run">—</div></div>
-          <div class="stat-card"><div class="stat-label">Stopped</div><div class="stat-val red" id="s-stop">—</div></div>
-          <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-val" id="s-uptime" style="font-size:18px">—</div></div>
-        </div>
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head">
-              <div class="card-head-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-                My Servers
-              </div>
-              <button class="btn btn-ghost btn-sm" id="btn-new-server" onclick="openAddServer()">+ New</button>
-            </div>
-            <div class="card-body" id="dash-servers"></div>
-          </div>
-          <div class="card">
-            <div class="card-head">
-              <div class="card-head-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                System
-              </div>
-              <span style="font-size:11px;color:var(--muted)" id="sys-uptime-lbl"></span>
-            </div>
-            <div class="card-body" id="sys-panel"></div>
-          </div>
-        </div>
-      </div>
-
-      <div id="page-servers" class="page">
-        <div class="search-bar">
-          <div class="search-input-wrap">
-            <span class="search-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-            <input class="form-input" placeholder="Search servers..." oninput="filterServers(this.value)">
-          </div>
-          <button class="btn btn-primary" id="btn-new-server2" onclick="openAddServer()">+ New Server</button>
-        </div>
-        <div class="card"><div class="card-body" id="servers-list"></div></div>
-      </div>
-
-      <div id="page-console" class="page">
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-          <select class="form-select" style="width:220px" id="console-sel" onchange="fetchLogsPage()"><option value="">Select server...</option></select>
-          <button class="btn btn-primary" onclick="fetchLogsPage()">Fetch Logs</button>
-          <button class="btn btn-ghost" onclick="toggleAutoRefresh()" id="btn-auto">▶ Auto Refresh</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('console-out').textContent=''">Clear</button>
-          <span style="font-size:11px;color:var(--muted)" id="console-status">Idle</span>
-        </div>
-        <div class="card">
-          <div class="card-head"><div class="card-head-title">Console Output</div></div>
-          <div class="card-body"><div class="console-wrap" style="height:calc(100vh - 260px)" id="console-out">Select a server and click Fetch Logs.</div></div>
-        </div>
-      </div>
-
-      <div id="page-users" class="page">
-        <div class="search-bar">
-          <div class="search-input-wrap">
-            <span class="search-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-            <input class="form-input" placeholder="Search users..." oninput="filterUsers(this.value)">
-          </div>
-          <button class="btn btn-primary" onclick="openAddUser()">+ New User</button>
-        </div>
-        <div class="card">
-          <table class="table" id="users-table">
-            <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Assigned Servers</th><th>Actions</th></tr></thead>
-            <tbody id="users-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="page-settings" class="page">
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head"><div class="card-head-title">Panel Config</div></div>
-            <div class="card-body">
-              <div class="setting-row">
-                <div class="setting-info"><div class="setting-name">Version</div></div>
-                <span class="badge badge-purple">v3.0 PREMIUM</span>
-              </div>
-              <div class="setting-row">
-                <div class="setting-info"><div class="setting-name">Connection</div></div>
-                <span id="cfg-conn-status" class="badge badge-green">Connected</span>
-              </div>
-              <div style="margin-top:16px;display:flex;gap:10px">
-                <button class="btn btn-ghost" onclick="ping()">Test Connection</button>
-                <button class="btn btn-ghost" id="btn-backup" onclick="doBackupNow()">Run Backup</button>
-              </div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-head"><div class="card-head-title">Quick Install</div></div>
-            <div class="card-body">
-              <div class="code-block">
-                <div class="cm"># Install on a new VPS</div>
-                <div class="cv">curl -fsSL https://YOUR-URL/install.sh | bash</div>
-                <br>
-                <div class="cm"># PM2 commands</div>
-                <div>pm2 logs saypanel-agent</div>
-                <div>pm2 restart saypanel-agent</div>
-                <div>pm2 stop saypanel-agent</div>
-                <br>
-                <div class="cm"># Restore on a new VPS</div>
-                <div class="cv">sudo bash /opt/saypanel/restore.sh</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </main>
-</div>
-
-<div class="modal-overlay" id="modal-server">
-  <div class="modal">
-    <div class="modal-title">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-      <span id="modal-server-title">New Server</span>
-    </div>
-    <div class="form-group"><label class="form-label">Server Name</label><input class="form-input" id="srv-name" placeholder="My Telegram Bot"></div>
-    <div class="form-group"><label class="form-label">Working Directory</label><input class="form-input" id="srv-dir" placeholder="/opt/saypanel/servers/my-bot"></div>
-    <div class="form-group"><label class="form-label">Startup Command</label><textarea class="form-textarea" id="srv-cmd" placeholder="node index.js"></textarea></div>
-    <div class="form-group">
-      <label class="form-label" style="margin-bottom:8px">Environment Variables</label>
-      <div id="env-rows"></div>
-      <div class="env-add" onclick="addEnvRow()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add Variable
-      </div>
-    </div>
-    <div class="form-group"><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="srv-auto"> Auto-start on boot</label></div>
-    <div class="form-group" id="assign-to-group" style="display:none">
-      <label class="form-label">Assign To Users</label>
-      <div class="assign-list" id="assign-to-list"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-server')">Cancel</button>
-      <button class="btn btn-primary" onclick="createServer()">Create Server</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-user">
-  <div class="modal">
-    <div class="modal-title">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span id="modal-user-title">New User</span>
-    </div>
-    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="u-username" placeholder="John Doe"></div>
-    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="u-email" type="email" placeholder="john@example.com"></div>
-    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="u-pass" type="password" placeholder="Min 6 characters"></div>
-    <div class="form-group">
-      <label class="form-label">Role</label>
-      <select class="form-select" id="u-role" style="width:100%">
-        <option value="user">User — view logs of assigned servers only</option>
-        <option value="subadmin">Sub-Admin — can manage assigned servers</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Assign Servers</label>
-      <div class="assign-list" id="user-assign-list"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-user')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveUser()">Save User</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-assign">
-  <div class="modal">
-    <div class="modal-title">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-      Assign Servers
-    </div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:14px" id="assign-modal-user-name"></div>
-    <div class="assign-list" id="assign-modal-list"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-assign')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAssign()">Save</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-logs">
-  <div class="modal modal-wide">
-    <div class="modal-title" id="log-modal-title">Logs</div>
-    <div class="log-modal-wrap" id="log-content">Loading...</div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-logs')">Close</button>
-      <button class="btn btn-primary" onclick="refreshLogs()">Refresh</button>
-    </div>
-  </div>
-</div>
-
-<div id="toast-container"></div>
-
+<div id="app"></div>
 <script>
-const TOK_KEY = 'saypanel_token_v3';
-let TOKEN = localStorage.getItem(TOK_KEY) || '';
-let SESSION_ROLE = '';
-let SESSION_ID   = '';
-let allServers = [];
-let allUsers   = [];
-let currentLogId = null;
-let autoTimer    = null;
-let editingUserId = null;
-let assigningUserId = null;
-
-async function doLogin() {
-  const email = document.getElementById('login-email').value.trim();
-  const pass  = document.getElementById('login-pass').value;
-  const errEl = document.getElementById('login-err');
-  errEl.style.display = 'none';
-  if (!email || !pass) { errEl.textContent = 'Enter email and password!'; errEl.style.display = 'block'; return; }
-  try {
-    const r = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password:pass}) });
-    const d = await r.json();
-    if (d.ok && d.token) {
-      TOKEN = d.token;
-      localStorage.setItem(TOK_KEY, TOKEN);
-      SESSION_ROLE = d.role;
-      SESSION_ID   = d.id;
-      applyRoleUI(d.role);
-      document.getElementById('sidebar-name').textContent    = d.username || email;
-      document.getElementById('sidebar-role').textContent    = roleLabel(d.role);
-      document.getElementById('sidebar-avatar').textContent  = (d.username || email)[0].toUpperCase();
-      document.getElementById('login-screen').classList.add('hidden');
-      document.getElementById('main-layout').style.display = 'flex';
-      initPanel();
-    } else {
-      errEl.textContent = d.error || 'Login failed';
-      errEl.style.display = 'block';
-    }
-  } catch(e) {
-    errEl.textContent = 'Connection failed: ' + e.message;
-    errEl.style.display = 'block';
-  }
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const S={token:localStorage.getItem('sp_token'),user:null,name:'NEXOR HOSTING'};
+let es=null,tick=null,cur=null,hist={cpu:[],mem:[],net:[]},lastNet=null,fileState={path:'/',sel:[]};
+const fb=n=>{n=+n||0;const u=['B','KiB','MiB','GiB','TiB'];let i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i?2:0)+' '+u[i]};
+const mbs=n=>n?(n>=1024?(n/1024).toFixed(n%1024?1:0)+' GiB':n+' MiB'):'Unlimited';
+const up=ms=>{if(!ms)return '-';let s=Math.floor((Date.now()-ms)/1000);const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(h?h+'h ':'')+m+'m'};
+function toast(m,t='o'){const e=document.createElement('div');e.className='toast '+t;e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),3200)}
+async function api(m,p,b,opt={}){
+const h={Authorization:'Bearer '+S.token};
+let body;
+if(b instanceof Blob||b instanceof ArrayBuffer||typeof b==='string'&&opt.text){body=b}
+else if(b!==undefined){h['Content-Type']='application/json';body=JSON.stringify(b)}
+const r=await fetch('/api'+p,{method:m,headers:h,body});
+if(r.status===401&&p!=='/login'){logout();throw new Error('Session expired')}
+if(opt.text)return r.ok?r.text():Promise.reject(new Error('Failed'));
+const j=await r.json().catch(()=>({}));
+if(!r.ok)throw new Error(j.error||'Request failed');
+return j;
 }
-
-function roleLabel(role) {
-  return { superadmin: 'Super Admin', subadmin: 'Sub-Admin', user: 'User' }[role] || role;
+const act=async(fn,ok)=>{try{const r=await fn();if(ok)toast(ok);return r}catch(e){toast(e.message,'e')}};
+function logout(){localStorage.removeItem('sp_token');S.token=null;S.user=null;location.hash='';render()}
+function modal(html){closeModal();const m=document.createElement('div');m.className='modal';m.id='modal';m.innerHTML='<div class="card">'+html+'</div>';m.addEventListener('mousedown',e=>{if(e.target===m)closeModal()});document.body.appendChild(m)}
+function closeModal(){const m=$('#modal');if(m)m.remove()}
+const field=(l,i)=>`<div class="f"><label>${l}</label>${i}</div>`;
+const sw=(id,on,l)=>`<div class="row sp f"><label style="margin:0">${l}</label><div class="sw"><input type="checkbox" id="${id}" ${on?'checked':''}><span></span></div></div>`;
+const dot=s=>`<span class="badge ${s}"><i></i>${s}</span>`;
+function shell(inner,active){
+return `<div class="top"><a class="brand" href="#/"><div class="logo"><img src="data:image/webp;base64,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" style="width:28px;height:28px;border-radius:8px;object-fit:cover"></div><span>${esc(S.name)}</span></a><div class="nav"><a href="#/" class="${active==='home'?'on':''}">Servers</a>${S.user.admin?`<a href="#/admin/overview" class="${active==='admin'?'on':''}">Admin</a>`:''}<a href="#/account" class="${active==='acc'?'on':''}">Account</a><button onclick="logout()">Logout</button></div></div><div class="wrap">${inner}</div><footer style="text-align:center;padding:22px 16px 32px;color:var(--mu);font-size:12px;border-top:1px solid var(--bd);margin-top:40px">&copy; 2026 NEXOR HOSTING &mdash; All Rights Reserved &nbsp;&middot;&nbsp; v1</footer>`;
 }
-
-function applyRoleUI(role) {
-  const isSA = role === 'superadmin';
-  document.getElementById('nav-admin-section').style.display = isSA ? '' : 'none';
-  document.getElementById('nav-users').style.display         = isSA ? '' : 'none';
-  document.getElementById('btn-new-server').style.display    = isSA ? '' : 'none';
-  document.getElementById('btn-new-server2').style.display   = isSA ? '' : 'none';
-  const backupBtn = document.getElementById('btn-backup');
-  if (backupBtn) backupBtn.style.display = isSA ? '' : 'none';
+function loginView(){
+$('#app').innerHTML=`<div class="login"><form class="card" id="lf"><div class="row" style="margin-bottom:22px"><div class="logo" style="width:44px;height:44px;border-radius:14px"><img src="data:image/webp;base64,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" style="width:44px;height:44px;border-radius:14px;object-fit:cover"></div><div><h1>${esc(S.name)}</h1><div class="mu">Sign in to your panel</div></div></div>${field('Email','<input name="email" type="email" required autocomplete="username">')}${field('Password','<input name="password" type="password" required autocomplete="current-password">')}<button class="btn p" style="width:100%;margin-top:6px">Sign in</button></form></div>`;
+$('#lf').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));try{const r=await api('POST','/login',d);S.token=r.token;S.user=r.user;S.name=r.name;localStorage.setItem('sp_token',r.token);location.hash='#/';render()}catch(x){toast(x.message,'e')}};
 }
-
-function doLogout() {
-  localStorage.removeItem(TOK_KEY);
-  TOKEN = ''; SESSION_ROLE = '';
-  document.getElementById('login-screen').classList.remove('hidden');
-  document.getElementById('main-layout').style.display = 'none';
+async function homeView(){
+$('#app').innerHTML=shell('<div class="row sp"><h1>Your servers</h1></div><div id="sl" class="grid g3" style="margin-top:16px"></div>','home');
+const draw=async()=>{
+const l=await api('GET','/servers'+(S.user.admin&&location.hash==='#/all'?'?all=1':''));
+const el=$('#sl');if(!el)return;
+el.innerHTML=l.length?l.map(s=>`<a class="card srv" href="#/s/${s.id}/console"><div class="row sp"><b style="font-size:16px">${esc(s.name)}</b>${dot(s.suspended?'offline':s.state)}</div><div class="mu mono" style="margin-top:4px">${esc(s.host||'')}:${s.allocations[0]?s.allocations[0].port:'-'}</div><div class="st"><div><b>${s.stats?s.stats.cpu.toFixed(1)+'%':'0%'}</b><span>CPU / ${s.cpu?s.cpu+'%':'∞'}</span></div><div><b>${s.stats?fb(s.stats.mem):'0 B'}</b><span>RAM / ${mbs(s.memory)}</span></div><div><b>${fb(s.diskUsed)}</b><span>Disk / ${mbs(s.disk)}</span></div></div></a>`).join(''):`<div class="card pad mu" style="grid-column:1/-1">No servers yet.${S.user.admin?' Create one from the Admin area.':' Ask an admin to create one for you.'}</div>`;
+};
+await act(draw);
+cur=setInterval(()=>draw().catch(()=>{}),4000);
 }
-
-document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-
-function api(endpoint, method='GET', body=null) {
-  const opts = { method, headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  return fetch('/api' + endpoint, opts).then(r => r.json());
+const spark=(a,max,c)=>{const n=40,d=a.slice(-n);if(d.length<2)return '<svg class="sp"></svg>';const m=max||Math.max(...d,1)*1.2;const pts=d.map((v,i)=>`${(i/(n-1)*100).toFixed(1)},${(60-Math.min(v/m,1)*56).toFixed(1)}`);return `<svg class="sp" viewBox="0 0 100 64" preserveAspectRatio="none"><defs><linearGradient id="g${c}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".4"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient></defs><polygon points="0,64 ${pts.join(' ')} ${((d.length-1)/(n-1)*100).toFixed(1)},64" fill="url(#g${c})"/><polyline points="${pts.join(' ')}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`};
+const TABS=['console','files','backups','network','startup','settings','activity'];
+async function serverView(id,tab){
+tab=TABS.includes(tab)?tab:'console';
+const s=await api('GET','/servers/'+id);
+$('#app').innerHTML=shell(`<div class="row sp"><div><h1 id="sn">${esc(s.name)}</h1><div class="mu">${esc(s.eggName)}</div></div><div class="row" id="pw"></div></div><div class="tabs">${TABS.map(t=>`<a href="#/s/${id}/${t}" class="${t===tab?'on':''}">${t[0].toUpperCase()+t.slice(1)}</a>`).join('')}</div><div id="tb"></div>`,'home');
+const pw=st=>{const r=st.state,run=r==='running';$('#pw').innerHTML=`${dot(st.suspended?'offline':r)}<button class="btn g" ${r!=='offline'||st.suspended?'disabled':''} onclick="power('${id}','start')">Start</button><button class="btn" ${!run?'disabled':''} onclick="power('${id}','restart')">Restart</button><button class="btn d" onclick="power('${id}','${r==='stopping'||r==='starting'?'kill':'stop'}')" ${r==='offline'||r==='installing'?'disabled':''}>${r==='stopping'||r==='starting'?'Kill':'Stop'}</button>`};
+pw(s);
+window.pwDraw=pw;
+const T={console:console_,files,backups,network,startup,settings,activity}[tab];
+await T(s);
 }
-
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const pg = document.getElementById('page-' + name);
-  if (pg) pg.classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => { if (n.getAttribute('onclick')?.includes(`'${name}'`)) n.classList.add('active'); });
-  const map = {
-    dashboard: ['Dashboard','Overview & stats'],
-    servers:   ['Servers','Manage servers'],
-    console:   ['Console','Live output'],
-    users:     ['Users','Manage accounts & permissions'],
-    settings:  ['Settings','Panel configuration']
-  };
-  const [t, s] = map[name] || ['Panel', ''];
-  document.getElementById('page-title').textContent = t;
-  document.getElementById('page-sub').textContent   = s;
-  if (name === 'dashboard') loadDashboard();
-  if (name === 'servers')   loadServersPage();
-  if (name === 'console')   populateConsoleSel();
-  if (name === 'users')     loadUsersPage();
-  if (autoTimer && name !== 'console') { clearInterval(autoTimer); autoTimer = null; document.getElementById('btn-auto').textContent = '▶ Auto Refresh'; }
+window.power=(id,a)=>act(()=>api('POST','/servers/'+id+'/power',{action:a}));
+async function console_(s){
+hist={cpu:[],mem:[],net:[]};lastNet=null;
+const a=s.allocations[0];
+$('#tb').innerHTML=`<div class="term"><pre id="lg"></pre><form id="cf"><input id="ci" placeholder="Type a command..." autocomplete="off" autocapitalize="off"><button class="btn s" style="margin:6px">Send</button></form></div><div class="grid g3" style="margin-top:14px"><div class="card stat"><div class="ico">⌁</div><div><small>Address</small><b class="mono">${esc(s.host||'')}:${a?a.port:'-'}</b></div></div><div class="card stat"><div class="ico">◷</div><div><small>Uptime</small><b id="s-up">-</b></div></div><div class="card stat"><div class="ico">◔</div><div><small>CPU load</small><b id="s-cpu">-</b></div></div><div class="card stat"><div class="ico">▦</div><div><small>Memory</small><b id="s-mem">-</b></div></div><div class="card stat"><div class="ico">◫</div><div><small>Disk</small><b id="s-dk">-</b></div></div><div class="card stat"><div class="ico">⇅</div><div><small>Network in / out</small><b id="s-net">-</b></div></div></div><div class="grid g3" style="margin-top:14px"><div class="card pad"><small class="mu">CPU</small><div id="c-cpu"></div></div><div class="card pad"><small class="mu">Memory</small><div id="c-mem"></div></div><div class="card pad"><small class="mu">Network</small><div id="c-net"></div></div></div>`;
+const lg=$('#lg');
+const strip=t=>t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g,'').replace(/\r/g,'');
+const add=t=>{const b=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-40;lg.textContent+=strip(t);if(lg.textContent.length>200000)lg.textContent=lg.textContent.slice(-150000);if(b)lg.scrollTop=lg.scrollHeight};
+es=new EventSource('/api/servers/'+s.id+'/stream?t='+S.token);
+es.addEventListener('log',e=>add(JSON.parse(e.data)));
+es.addEventListener('stats',e=>{
+const st=JSON.parse(e.data);window.pwDraw&&window.pwDraw({...s,...st});
+const g=x=>document.getElementById(x);if(!g('s-cpu'))return;
+const m=st.stats;
+g('s-up').textContent=st.state==='running'?up(st.since):'-';
+g('s-cpu').textContent=m?m.cpu.toFixed(2)+'% / '+(s.cpu?s.cpu+'%':'Unlimited'):'0% / '+(s.cpu?s.cpu+'%':'Unlimited');
+g('s-mem').textContent=(m?fb(m.mem):'0 B')+' / '+mbs(s.memory);
+g('s-dk').textContent=fb(st.diskUsed)+' / '+mbs(s.disk);
+g('s-net').textContent=m?fb(m.rx)+' / '+fb(m.tx):'-';
+hist.cpu.push(m?m.cpu:0);hist.mem.push(m?m.mem/1048576:0);
+const tot=m?m.rx+m.tx:0;hist.net.push(lastNet===null||tot<lastNet?0:(tot-lastNet)/3);lastNet=m?tot:null;
+g('c-cpu').innerHTML=spark(hist.cpu,s.cpu||100,'#7c6cff');
+g('c-mem').innerHTML=spark(hist.mem,s.memory||0,'#33d6c3');
+g('c-net').innerHTML=spark(hist.net,0,'#ffc857');
+});
+$('#cf').onsubmit=async e=>{e.preventDefault();const i=$('#ci');const v=i.value;if(!v)return;i.value='';await act(()=>api('POST','/servers/'+s.id+'/command',{cmd:v}))};
 }
-
-function openModal(id)  { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-function openAddServer() {
-  editingUserId = null;
-  document.getElementById('modal-server-title').textContent = 'New Server';
-  ['srv-name','srv-dir','srv-cmd'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('srv-auto').checked = false;
-  document.getElementById('env-rows').innerHTML = '';
-  const ag = document.getElementById('assign-to-group');
-  if (SESSION_ROLE === 'superadmin') {
-    ag.style.display = '';
-    const list = document.getElementById('assign-to-list');
-    list.innerHTML = '';
-    allUsers.forEach(u => {
-      if (u.role === 'superadmin') return;
-      const chip = document.createElement('div');
-      chip.className = 'assign-chip';
-      chip.dataset.uid = u.id;
-      chip.textContent = u.username + ' (' + roleLabel(u.role) + ')';
-      chip.onclick = () => chip.classList.toggle('selected');
-      list.appendChild(chip);
-    });
-  } else {
-    ag.style.display = 'none';
-  }
-  openModal('modal-server');
+function crumbs(p){const parts=p.split('/').filter(Boolean);let acc='';return `<a href="javascript:fl('/')" class="mu">home</a>`+parts.map(x=>{acc+='/'+x;return ` / <a href="javascript:fl('${esc(acc)}')">${esc(x)}</a>`}).join('')}
+async function files(s){
+const p=fileState.path;fileState.sel=[];
+const l=await api('GET',`/servers/${s.id}/files?path=${encodeURIComponent(p)}`);
+const j=n=>(p==='/'?'':p)+'/'+n;
+$('#tb').innerHTML=`<div class="card"><div class="pad row sp"><div class="mono" style="word-break:break-all">${crumbs(p)}</div><div class="row"><button class="btn s d" id="bd" style="display:none" onclick="fdel()">Delete selected</button><button class="btn s" onclick="fnew('dir')">New folder</button><button class="btn s" onclick="fnew('file')">New file</button><label class="btn s p" style="margin:0;color:#fff;cursor:pointer">Upload<input type="file" multiple hidden onchange="fup(this.files)"></label></div></div><div class="scroll"><table><tbody>${p!=='/'?`<tr class="fr" onclick="fl('${esc(p.replace(/\/[^/]*$/,'')||'/')}')"><td></td><td colspan="4">..</td></tr>`:''}${l.map(f=>`<tr class="fr"><td style="width:34px" onclick="event.stopPropagation()"><input type="checkbox" style="width:auto" onchange="fsel('${esc(j(f.name))}',this.checked)"></td><td onclick="${f.dir?`fl('${esc(j(f.name))}')`:`fedit('${esc(j(f.name))}')`}">${f.dir?'[/]':''}${esc(f.name)}</td><td class="mu hide-m">${f.dir?'':fb(f.size)}</td><td class="mu hide-m">${new Date(f.mtime).toLocaleString()}</td><td style="text-align:right;white-space:nowrap">${f.dir?'':`<button class="btn s" onclick="window.open('/api/servers/${s.id}/files/download?t=${S.token}&path='+encodeURIComponent('${esc(j(f.name))}'))">↓</button> `}${/\.(zip|tar|tar\.gz|tgz)$/i.test(f.name)?`<button class="btn s" onclick="fx('${esc(j(f.name))}')">Extract</button> `:''}<button class="btn s" onclick="frn('${esc(j(f.name))}')">Rename</button></td></tr>`).join('')||'<tr><td class="mu pad">Empty directory</td></tr>'}</tbody></table></div></div>`;
+window.CS=s;
 }
-
-function addEnvRow(k='', v='') {
-  const d = document.createElement('div'); d.className = 'env-row';
-  d.innerHTML = `<input class="form-input" placeholder="KEY" value="${k}"><input class="form-input" placeholder="value" value="${v}" style="flex:2"><button class="icon-btn del" onclick="this.parentElement.remove()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>`;
-  document.getElementById('env-rows').appendChild(d);
+window.fl=p=>{fileState.path=p;route()};
+window.fsel=(p,on)=>{const a=fileState.sel;if(on)a.push(p);else a.splice(a.indexOf(p),1);$('#bd').style.display=a.length?'':'none'};
+window.fdel=async()=>{if(!confirm('Delete '+fileState.sel.length+' item(s)?'))return;await act(()=>api('POST',`/servers/${CS.id}/files/delete`,{paths:fileState.sel}),'Deleted');route()};
+window.fnew=t=>{const n=prompt(t==='dir'?'Folder name':'File name');if(!n)return;const p=(fileState.path==='/'?'':fileState.path)+'/'+n;if(t==='dir')act(()=>api('POST',`/servers/${CS.id}/files/mkdir`,{path:p})).then(route);else fedit(p,true)};
+window.frn=async p=>{const n=prompt('New name',p.split('/').pop());if(!n)return;await act(()=>api('POST',`/servers/${CS.id}/files/rename`,{from:p,to:p.replace(/[^/]*$/,'')+n}));route()};
+window.fx=async p=>{await act(()=>api('POST',`/servers/${CS.id}/files/extract`,{path:p}),'Extracted');route()};
+window.fup=async fs=>{for(const f of fs){await act(()=>api('POST',`/servers/${CS.id}/files/upload?path=${encodeURIComponent(fileState.path)}&name=${encodeURIComponent(f.name)}`,f),'Uploaded '+f.name)}route()};
+window.fedit=async(p,isNew)=>{
+let t='';if(!isNew)try{t=await api('GET',`/servers/${CS.id}/files/read?path=${encodeURIComponent(p)}`,undefined,{text:true})}catch(e){return toast(e.message,'e')}
+modal(`<div class="row sp" style="margin-bottom:12px"><b class="mono" style="word-break:break-all">${esc(p)}</b><button class="btn s" onclick="closeModal()">Close</button></div><textarea id="ed" style="min-height:55vh;white-space:pre;tab-size:2" spellcheck="false">${esc(t)}</textarea><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn p" onclick="fsave('${esc(p)}')">Save</button></div>`);
+};
+window.fsave=async p=>{await act(()=>api('PUT',`/servers/${CS.id}/files/write?path=${encodeURIComponent(p)}`,new Blob([$('#ed').value]),{}),'Saved');closeModal();route()};
+async function backups(s){
+const l=await api('GET',`/servers/${s.id}/backups`);
+$('#tb').innerHTML=`<div class="card"><div class="pad row sp"><h2 style="margin:0">Backups <span class="mu">${l.length}/10</span></h2><button class="btn p" onclick="bk('${s.id}')">Create backup</button></div><div class="scroll"><table><tbody>${l.map(b=>`<tr><td class="mono">${esc(b.name)}</td><td class="mu">${fb(b.size)}</td><td style="text-align:right;white-space:nowrap"><button class="btn s" onclick="window.open('/api/servers/${s.id}/backups/${esc(b.name)}?t=${S.token}')">Download</button> <button class="btn s" onclick="bkr('${s.id}','${esc(b.name)}')">Restore</button> <button class="btn s d" onclick="bkd('${s.id}','${esc(b.name)}')">Delete</button></td></tr>`).join('')||'<tr><td class="mu pad">No backups yet</td></tr>'}</tbody></table></div></div>`;
 }
-
-async function loadDashboard() {
-  try {
-    const [servers, sys, pong] = await Promise.all([api('/servers'), api('/system'), api('/ping')]);
-    allServers = Array.isArray(servers) ? servers : [];
-    const running = allServers.filter(s => s.status === 'running').length;
-    document.getElementById('s-total').textContent = allServers.length;
-    document.getElementById('s-run').textContent   = running;
-    document.getElementById('s-stop').textContent  = allServers.length - running;
-    if (pong.uptime) {
-      const u = Math.floor(pong.uptime), h = Math.floor(u/3600), m = Math.floor((u%3600)/60);
-      document.getElementById('s-uptime').textContent = h + 'h ' + m + 'm';
-    }
-    renderSysPanel(sys);
-    renderDashServers();
-    const dot = document.getElementById('conn-dot');
-    dot.className = 'dot green';
-    document.getElementById('conn-label').textContent = 'Connected';
-  } catch(e) {
-    document.getElementById('conn-dot').className = 'dot red';
-    document.getElementById('conn-label').textContent = 'Offline';
-    toast('Agent offline!', 'error');
-  }
+window.bk=async id=>{toast('Creating backup...');await act(()=>api('POST',`/servers/${id}/backups`),'Backup created');route()};
+window.bkr=async(id,n)=>{if(!confirm('Restore this backup? Current files will be replaced.'))return;await act(()=>api('POST',`/servers/${id}/backups/${n}/restore`),'Restored');route()};
+window.bkd=async(id,n)=>{if(!confirm('Delete backup?'))return;await act(()=>api('DELETE',`/servers/${id}/backups/${n}`),'Deleted');route()};
+async function network(s){
+$('#tb').innerHTML=`<div class="card"><div class="scroll"><table><thead><tr><th>Host</th><th>Port</th><th></th></tr></thead><tbody>${s.allocations.map((a,i)=>`<tr><td class="mono">${esc(s.host||a.ip)}</td><td class="mono">${a.port}</td><td>${i===0?'<span class="badge running"><i></i>Primary</span>':''}</td></tr>`).join('')}</tbody></table></div></div><p class="mu" style="margin-top:12px">Your app must listen on the primary port. It is also passed as the SERVER_PORT environment variable.</p>`;
 }
-
-function renderSysPanel(sys) {
-  if (!sys || sys.error) {
-    document.getElementById('sys-panel').innerHTML = '<div style="color:var(--muted);text-align:center;padding:20px 0;font-size:12px">Could not load</div>';
-    return;
-  }
-  const memPct  = Math.round((sys.memory.used / (sys.memory.total || 1)) * 100);
-  const diskPct = sys.disk.percent || 0;
-  document.getElementById('sys-uptime-lbl').textContent = sys.uptime || '';
-  document.getElementById('sys-panel').innerHTML = `
-    <div class="sys-row"><div class="sys-label">RAM</div><div class="bar-wrap"><div class="bar-fill ${memPct>80?'bar-red':'bar-blue'}" style="width:${memPct}%"></div></div><div class="sys-val">${memPct}%</div></div>
-    <div class="sys-row"><div class="sys-label">Disk</div><div class="bar-wrap"><div class="bar-fill ${diskPct>85?'bar-red':'bar-green'}" style="width:${diskPct}%"></div></div><div class="sys-val">${diskPct}%</div></div>
-    <div class="mini-grid">
-      <div class="mini-stat"><div class="mini-val">${sys.memory.used}MB</div><div class="mini-lbl">RAM Used</div></div>
-      <div class="mini-stat"><div class="mini-val">${sys.disk.used}</div><div class="mini-lbl">Disk Used</div></div>
-      <div class="mini-stat"><div class="mini-val">${sys.cpus}</div><div class="mini-lbl">CPU Cores</div></div>
-      <div class="mini-stat"><div class="mini-val">${allServers.filter(s=>s.status==='running').length}</div><div class="mini-lbl">Running</div></div>
-    </div>`;
+async function startup(s){
+$('#tb').innerHTML=`<div class="grid g2"><div class="card pad"><h2>Startup command</h2><textarea id="su">${esc(s.startup)}</textarea></div><div class="card pad"><h2>Docker image</h2><select id="im">${Object.entries(s.images).map(([k,v])=>`<option value="${esc(v)}" ${v===s.image?'selected':''}>${esc(k)}</option>`).join('')}</select><p class="mu" style="margin-top:8px;font-size:13px">Restart the server after changing the image.</p></div></div><h2 style="margin:20px 0 12px">Variables</h2><div class="grid g2">${s.variables.map(v=>`<div class="card pad"><label>${esc(v.name)} <span class="mono">${esc(v.env_variable)}</span></label><input data-v="${esc(v.env_variable)}" value="${esc(s.vars[v.env_variable]??v.default_value)}" ${v.user_editable===false?'disabled':''}></div>`).join('')}</div><div class="row" style="margin-top:16px;justify-content:flex-end"><button class="btn p" id="sv">Save changes</button></div>`;
+$('#sv').onclick=()=>{const vars={};document.querySelectorAll('[data-v]').forEach(i=>vars[i.dataset.v]=i.value);act(()=>api('PUT','/servers/'+s.id,{startup:$('#su').value,image:$('#im').value,vars}),'Saved')};
 }
-
-function srvRow(s) {
-  const icoType = (s.name.toLowerCase().includes('bot') || s.name.toLowerCase().includes('tg')) ? 'bot' : 'server';
-  const ico = icoType === 'bot'
-    ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><line x1="12" y1="3" x2="12" y2="7"/><circle cx="8" cy="16" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1" fill="currentColor" stroke="none"/></svg>`
-    : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`;
-  const canControl = SESSION_ROLE !== 'user';
-  const startBtn  = `<button class="icon-btn start" title="Start" onclick="doStart('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>`;
-  const stopBtn   = `<button class="icon-btn stop-btn" title="Stop" onclick="doStop('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>`;
-  const logBtn    = `<button class="icon-btn log-btn" title="Logs" onclick="openLogs('${s.id}','${s.name}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></button>`;
-  const delBtn    = SESSION_ROLE === 'superadmin' ? `<button class="icon-btn del" title="Delete" onclick="doDelete('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>` : '';
-  const statusBadge = s.status === 'running'
-    ? `<span class="badge badge-green"><span class="dot green" style="width:5px;height:5px;display:inline-block;margin-right:3px"></span>Running</span>`
-    : `<span class="badge badge-red"><span class="dot red" style="width:5px;height:5px;display:inline-block;margin-right:3px"></span>Stopped</span>`;
-  return `<div class="server-row">
-    <div class="srv-ico">${ico}</div>
-    <div class="srv-info"><div class="srv-name">${s.name}</div><div class="srv-meta">${(s.startup||'').slice(0,48)}</div></div>
-    ${statusBadge}
-    <div class="srv-actions">
-      ${canControl ? (s.status === 'running' ? stopBtn : startBtn) : ''}
-      ${logBtn}
-      ${delBtn}
-    </div>
-  </div>`;
+async function settings(s){
+$('#tb').innerHTML=`<div class="grid g2"><div class="card pad"><h2>Server details</h2>${field('Server name',`<input id="nm" value="${esc(s.name)}">`)}${field('Server ID',`<input value="${s.id}" readonly class="mono">`)}<div class="row" style="justify-content:flex-end"><button class="btn p" id="sn2">Save</button></div></div><div class="card pad"><h2>Limits</h2><div class="row sp"><span class="mu">CPU</span><b>${s.cpu?s.cpu+'%':'Unlimited'}</b></div><div class="row sp"><span class="mu">Memory</span><b>${mbs(s.memory)}</b></div><div class="row sp"><span class="mu">Swap</span><b>${s.swap<0?'Unlimited':s.swap?mbs(s.swap):'Disabled'}</b></div><div class="row sp"><span class="mu">Disk</span><b>${mbs(s.disk)}</b></div><div class="row sp"><span class="mu">OOM killer</span><b>${s.oom?'Enabled':'Disabled'}</b></div></div><div class="card pad"><h2>Reinstall server</h2><p class="mu" style="margin-bottom:14px">Stops nothing by itself; the server must be offline. Some files may be modified by the egg install script.</p><button class="btn d" onclick="reinst('${s.id}')">Reinstall server</button></div></div>`;
+$('#sn2').onclick=()=>act(()=>api('PUT','/servers/'+s.id,{name:$('#nm').value}),'Saved').then(()=>$('#sn').textContent=$('#nm').value);
 }
-
-function renderDashServers() {
-  const el = document.getElementById('dash-servers');
-  if (!allServers.length) {
-    el.innerHTML = `<div class="empty-state"><div class="e-ico"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div><div class="e-title">No servers yet</div><div class="e-sub">${SESSION_ROLE==='superadmin'?'Create one above':'No servers assigned to you'}</div></div>`;
-    return;
-  }
-  el.innerHTML = allServers.slice(0, 6).map(s => srvRow(s)).join('');
+window.reinst=async id=>{if(!confirm('Reinstall this server?'))return;await act(()=>api('POST',`/servers/${id}/reinstall`),'Reinstall started')};
+async function activity(s){
+const l=await api('GET',`/servers/${s.id}/activity`);
+$('#tb').innerHTML=`<div class="card"><div class="scroll"><table><tbody>${l.map(a=>`<tr><td><b>${esc(a.u)}</b> <span class="mu mono">${esc(a.ev)}</span><div class="mu" style="font-size:13px">${esc(a.d)}</div></td><td class="mu" style="text-align:right;white-space:nowrap">${new Date(a.t).toLocaleString()}</td></tr>`).join('')||'<tr><td class="mu pad">No activity yet</td></tr>'}</tbody></table></div></div>`;
 }
-
-async function loadServersPage() {
-  try {
-    allServers = await api('/servers');
-    renderServersList(allServers);
-    populateConsoleSel();
-    if (SESSION_ROLE === 'superadmin') {
-      allUsers = await api('/users');
-    }
-  } catch(e) { toast(e.message, 'error'); }
+const ATABS=['overview','servers','users','eggs','allocations','settings'];
+async function adminView(tab){
+if(!S.user.admin){location.hash='#/';return}
+tab=ATABS.includes(tab)?tab:'overview';
+$('#app').innerHTML=shell(`<h1>Administration</h1><div class="tabs">${ATABS.map(t=>`<a href="#/admin/${t}" class="${t===tab?'on':''}">${t[0].toUpperCase()+t.slice(1)}</a>`).join('')}</div><div id="tb"></div>`,'admin');
+await ({overview:aOverview,servers:aServers,users:aUsers,eggs:aEggs,allocations:aAllocs,settings:aSettings})[tab]();
 }
-
-function renderServersList(list) {
-  const el = document.getElementById('servers-list');
-  if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="e-ico"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div><div class="e-title">No servers found</div><div class="e-sub">Click "+ New Server" to add one</div></div>`;
-    return;
-  }
-  el.innerHTML = list.map(s => srvRow(s)).join('');
+async function aOverview(){
+const o=await api('GET','/admin/overview');
+const c=(l,v,i)=>`<div class="card stat"><div class="ico">${i}</div><div><small>${l}</small><b style="font-size:22px">${v}</b></div></div>`;
+$('#tb').innerHTML=`<div class="grid g4">${c('Servers',o.servers,'▣')}${c('Running',o.running,'▶')}${c('Users',o.users,'☺')}${c('Eggs',o.eggs,'◈')}${c('Free ports',o.free+' / '+o.allocations,'⌁')}${c('Docker',esc(o.docker),'⛁')}</div>`;
 }
-
-function filterServers(q) {
-  renderServersList(allServers.filter(s => s.name.toLowerCase().includes(q.toLowerCase())));
+async function aServers(){
+const [l,u]=await Promise.all([api('GET','/servers?all=1'),api('GET','/admin/users')]);
+window.AU=u;
+$('#tb').innerHTML=`<div class="card"><div class="pad row sp"><h2 style="margin:0">All servers</h2><button class="btn p" onclick="sform()">Create server</button></div><div class="scroll"><table><thead><tr><th>Name</th><th>Owner</th><th>Egg</th><th>Port</th><th>Limits</th><th></th></tr></thead><tbody>${l.map(s=>`<tr><td><a href="#/s/${s.id}/console"><b>${esc(s.name)}</b></a><div>${dot(s.suspended?'offline':s.state)}</div></td><td class="mu">${esc((u.find(x=>x.id===s.owner)||{}).email||'-')}</td><td class="mu">${esc(s.eggName)}</td><td class="mono">${s.allocations[0]?s.allocations[0].port:'-'}</td><td class="mu" style="font-size:13px">${s.cpu?s.cpu+'%':'∞'} · ${mbs(s.memory)} · ${mbs(s.disk)}</td><td style="text-align:right;white-space:nowrap"><button class="btn s" onclick='sform(${JSON.stringify(s.id)})'>Edit</button> <button class="btn s" onclick="ssus('${s.id}',${!s.suspended})">${s.suspended?'Unsuspend':'Suspend'}</button> <button class="btn s d" onclick="sdel('${s.id}')">Delete</button></td></tr>`).join('')||'<tr><td class="mu pad">No servers</td></tr>'}</tbody></table></div></div>`;
+window.AS=l;
 }
-
-async function createServer() {
-  const name = document.getElementById('srv-name').value.trim();
-  const dir  = document.getElementById('srv-dir').value.trim();
-  const cmd  = document.getElementById('srv-cmd').value.trim();
-  const auto = document.getElementById('srv-auto').checked;
-  if (!name || !cmd) { toast('Name and startup command are required!', 'error'); return; }
-  const env = {};
-  document.querySelectorAll('#env-rows .env-row').forEach(row => {
-    const inp = row.querySelectorAll('input');
-    if (inp[0].value && inp[1].value) env[inp[0].value] = inp[1].value;
-  });
-  const assigned_to = SESSION_ROLE === 'superadmin'
-    ? [...document.querySelectorAll('#assign-to-list .assign-chip.selected')].map(c => c.dataset.uid)
-    : [];
-  try {
-    const r = await api('/servers', 'POST', { name, directory: dir, startup: cmd, env, autostart: auto, assigned_to });
-    if (r.ok) { toast(`"${name}" created!`, 'success'); closeModal('modal-server'); loadDashboard(); loadServersPage(); }
-    else toast(r.error || 'Failed', 'error');
-  } catch(e) { toast(e.message, 'error'); }
+window.ssus=async(id,v)=>{await act(()=>api('POST',`/admin/servers/${id}/suspend`,{suspend:v}),'Done');route()};
+window.sdel=async id=>{if(!confirm('Delete this server and all its files?'))return;await act(()=>api('DELETE','/admin/servers/'+id),'Deleted');route()};
+window.sform=async id=>{
+const [eggs,al]=await Promise.all([api('GET','/admin/eggs'),api('GET','/admin/allocations')]);
+const s=id?AS.find(x=>x.id===id):null;
+const free=al.filter(a=>!a.server);
+if(!s&&!free.length)return toast('No free allocations. Add ports in Allocations.','e');
+window.SF={eggs,s};
+modal(`<div class="row sp" style="margin-bottom:14px"><h2 style="margin:0">${s?'Edit server':'Create server'}</h2><button class="btn s" onclick="closeModal()">Close</button></div><div class="grid g2" style="gap:0 14px">${field('Server name',`<input id="f-name" value="${esc(s?s.name:'')}" placeholder="My Server">`)}${field('Owner user',`<select id="f-owner">${AU.map(u=>`<option value="${u.id}" ${s&&s.owner===u.id?'selected':''}>${esc(u.email)}</option>`).join('')}</select>`)}${s?'':field('Egg (server type)',`<select id="f-egg" onchange="sfegg()">${eggs.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>`)}${field('Docker image / version','<select id="f-img"></select>')}${s?'':field('Allocation (port)',`<select id="f-al">${free.map(a=>`<option value="${a.id}">${esc(a.ip)}:${a.port}</option>`).join('')}</select>`)}${field('CPU limit % (0 = unlimited)',`<input id="f-cpu" type="number" min="0" value="${s?s.cpu:100}">`)}${field('Memory MB (0 = unlimited)',`<input id="f-mem" type="number" min="0" value="${s?s.memory:512}">`)}${field('Swap MB (0 disabled, -1 unlimited)',`<input id="f-swap" type="number" min="-1" value="${s?s.swap:0}">`)}${field('Disk MB (0 = unlimited)',`<input id="f-dk" type="number" min="0" value="${s?s.disk:2048}">`)}</div>${sw('f-oom',s?s.oom:true,'Enable OOM killer (recommended)')}${field('Startup command','<textarea id="f-su" style="min-height:70px"></textarea>')}<div id="f-vars"></div><div class="row" style="justify-content:flex-end"><button class="btn p" id="f-ok">${s?'Save changes':'Create server'}</button></div>`);
+sfegg();
+$('#f-ok').onclick=async()=>{
+const vars={};document.querySelectorAll('[data-fv]').forEach(i=>vars[i.dataset.fv]=i.value);
+const b={name:$('#f-name').value,owner:$('#f-owner').value,egg:s?s.egg:$('#f-egg').value,image:$('#f-img').value,cpu:$('#f-cpu').value,memory:$('#f-mem').value,swap:$('#f-swap').value,disk:$('#f-dk').value,oom:$('#f-oom').checked,startup:$('#f-su').value,vars};
+if(!s)b.allocation=$('#f-al').value;
+const r=await act(()=>s?api('PUT','/admin/servers/'+s.id,b):api('POST','/admin/servers',b),s?'Saved':'Server created, installing...');
+if(r){closeModal();route()}
+};
+};
+window.sfegg=()=>{
+const {eggs,s}=SF;
+const e=eggs.find(x=>x.id===(s?s.egg:$('#f-egg').value));
+$('#f-img').innerHTML=Object.entries(e.docker_images).map(([k,v])=>`<option value="${esc(v)}" ${s&&s.image===v?'selected':''}>${esc(k)}</option>`).join('');
+$('#f-su').value=s?s.startup:e.startup;
+$('#f-vars').innerHTML=e.variables.length?`<h2 style="margin-top:6px">Variables</h2><div class="grid g2">`+e.variables.map(v=>field(`${esc(v.name)} <span class="mono" style="font-size:11px">${esc(v.env_variable)}</span>${v.user_editable===false?'<span class="mu" style="font-size:11px"> (fixed)</span>':''}`,`<input data-fv="${esc(v.env_variable)}" value="${esc(s&&s.vars[v.env_variable]!==undefined?s.vars[v.env_variable]:v.default_value)}" ${v.user_editable===false?'disabled':''}>`)).join('')+'</div>':'';
+};
+async function aUsers(){
+const l=await api('GET','/admin/users');
+window.AUL=l;
+$('#tb').innerHTML=`<div class="card"><div class="pad row sp"><h2 style="margin:0">Users</h2><button class="btn p" onclick="uform()">New user</button></div><div class="scroll"><table><thead><tr><th>Email</th><th>Username</th><th>Role</th><th>Servers</th><th></th></tr></thead><tbody>${l.map(u=>`<tr><td>${esc(u.email)}</td><td class="mu">${esc(u.username)}</td><td>${u.admin?'<span class="badge running"><i></i>Admin</span>':'<span class="badge"><i></i>User</span>'}</td><td class="mu">${u.servers}</td><td style="text-align:right;white-space:nowrap"><button class="btn s" onclick="viewUserServers('${u.id}','${esc(u.email)}')">Servers</button> <button class="btn s" onclick="uform('${u.id}')">Edit</button> <button class="btn s d" onclick="udel('${u.id}')">Delete</button></td></tr>`).join('')}</tbody></table></div></div>`;
 }
-
-async function doStart(id)  { try { await api(`/servers/${id}/start`, 'POST'); toast('Starting...', 'success'); setTimeout(() => { loadDashboard(); loadServersPage(); }, 1000); } catch(e) { toast(e.message, 'error'); } }
-async function doStop(id)   { try { await api(`/servers/${id}/stop`, 'POST');  toast('Stopped', 'info');    setTimeout(() => { loadDashboard(); loadServersPage(); }, 500);  } catch(e) { toast(e.message, 'error'); } }
-async function doDelete(id) {
-  if (!confirm('Delete this server? This cannot be undone.')) return;
-  try { await api(`/servers/${id}`, 'DELETE'); toast('Deleted', 'info'); loadDashboard(); loadServersPage(); }
-  catch(e) { toast(e.message, 'error'); }
+window.uform=id=>{
+const u=id?AUL.find(x=>x.id===id):null;
+modal(`<div class="row sp" style="margin-bottom:14px"><h2 style="margin:0">${u?'Edit user':'New user'}</h2><button class="btn s" onclick="closeModal()">Close</button></div>${field('Email',`<input id="u-e" type="email" value="${esc(u?u.email:'')}">`)}${field('Username',`<input id="u-n" value="${esc(u?u.username:'')}">`)}${field(u?'New password (leave empty to keep)':'Password','<input id="u-p" type="password">')}${sw('u-a',u&&u.admin,'Administrator')}<div class="row" style="justify-content:flex-end"><button class="btn p" id="u-ok">Save</button></div>`);
+$('#u-ok').onclick=async()=>{const b={email:$('#u-e').value,username:$('#u-n').value,admin:$('#u-a').checked};if($('#u-p').value)b.password=$('#u-p').value;const r=await act(()=>u?api('PUT','/admin/users/'+u.id,b):api('POST','/admin/users',b),'Saved');if(r){closeModal();route()}};
+};
+window.udel=async id=>{if(!confirm('Delete user?'))return;await act(()=>api('DELETE','/admin/users/'+id),'Deleted');route()};
+window.viewUserServers=async(uid,email)=>{
+const servers=await api('GET',`/admin/users/${uid}/servers`);
+modal(`<div class="row sp" style="margin-bottom:14px"><h2 style="margin:0">Servers — ${esc(email)}</h2><button class="btn s" onclick="closeModal()">Close</button></div><div class="scroll"><table><thead><tr><th>Name</th><th>Egg</th><th>Port</th><th>Status</th><th></th></tr></thead><tbody>${servers.length?servers.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td class="mu">${esc(s.eggName)}</td><td class="mono">${s.allocations[0]?s.allocations[0].port:'-'}</td><td>${dot(s.suspended?'offline':s.state)}</td><td style="text-align:right;white-space:nowrap"><a href="#/s/${s.id}/console" onclick="closeModal()" class="btn s">Open</a> <button class="btn s" onclick="closeModal();ssus('${s.id}',${!s.suspended})">${s.suspended?'Unsuspend':'Suspend'}</button> <button class="btn s d" onclick="closeModal();sdel('${s.id}')">Delete</button></td></tr>`).join(''):'<tr><td class="mu pad" colspan="5">No servers</td></tr>'}</tbody></table></div>`);
+};
+async function aEggs(){
+const l=await api('GET','/admin/eggs');
+window.AE=l;
+$('#tb').innerHTML=`<div class="card"><div class="pad row sp"><h2 style="margin:0">Eggs</h2><button class="btn p" onclick="eform()">Import egg</button></div><div class="scroll"><table><thead><tr><th>Name</th><th>Images</th><th>Variables</th><th></th></tr></thead><tbody>${l.map(e=>`<tr><td><b>${esc(e.name)}</b><div class="mu" style="font-size:13px">${esc(e.description||'')}</div></td><td class="mu">${Object.keys(e.docker_images).length}</td><td class="mu">${e.variables.length}</td><td style="text-align:right;white-space:nowrap"><button class="btn s" onclick="eform('${e.id}')">Edit JSON</button> <button class="btn s d" onclick="edel('${e.id}')">Delete</button></td></tr>`).join('')}</tbody></table></div></div>`;
 }
-
-async function openLogs(id, name) {
-  currentLogId = id;
-  document.getElementById('log-modal-title').textContent = 'Logs — ' + name;
-  document.getElementById('log-content').textContent = 'Loading...';
-  openModal('modal-logs');
-  await refreshLogs();
+window.eform=id=>{
+const e=id?AE.find(x=>x.id===id):null;
+const j=e?(({id,...r})=>r)(e):'';
+modal(`<div class="row sp" style="margin-bottom:14px"><h2 style="margin:0">${e?'Edit egg':'Import egg'}</h2><button class="btn s" onclick="closeModal()">Close</button></div><p class="mu" style="margin-bottom:10px;font-size:13px">Paste a Pterodactyl egg JSON (PTDL_v1 / PTDL_v2) or load a file.</p><input type="file" accept=".json" id="e-f" style="margin-bottom:10px"><textarea id="e-j" style="min-height:44vh;white-space:pre" spellcheck="false">${esc(e?JSON.stringify(j,null,2):'')}</textarea><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="e-ok">${e?'Save':'Import'}</button></div>`);
+$('#e-f').onchange=async ev=>{$('#e-j').value=await ev.target.files[0].text()};
+$('#e-ok').onclick=async()=>{const r=await act(()=>e?api('PUT','/admin/eggs/'+e.id,{json:$('#e-j').value}):api('POST','/admin/eggs',{json:$('#e-j').value}),'Saved');if(r){closeModal();route()}};
+};
+window.edel=async id=>{if(!confirm('Delete egg?'))return;await act(()=>api('DELETE','/admin/eggs/'+id),'Deleted');route()};
+async function aAllocs(){
+const l=await api('GET','/admin/allocations');
+$('#tb').innerHTML=`<div class="grid g2"><div class="card pad"><h2>Add ports</h2>${field('IP address','<input id="a-ip" value="0.0.0.0">')}<div class="grid g2" style="gap:0 12px">${field('Start port','<input id="a-s" type="number" placeholder="25565">')}${field('End port (optional)','<input id="a-e" type="number">')}</div><div class="row" style="justify-content:flex-end"><button class="btn p" id="a-ok">Add</button></div></div><div class="card pad"><h2>Summary</h2><div class="row sp"><span class="mu">Total</span><b>${l.length}</b></div><div class="row sp"><span class="mu">Free</span><b>${l.filter(a=>!a.server).length}</b></div></div></div><div class="card" style="margin-top:14px"><div class="scroll"><table><thead><tr><th>Address</th><th>Assigned to</th><th></th></tr></thead><tbody>${l.map(a=>`<tr><td class="mono">${esc(a.ip)}:${a.port}</td><td class="mu">${esc(a.serverName||'-')}</td><td style="text-align:right">${a.server?'':`<button class="btn s d" onclick="adel('${a.id}')">Remove</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+$('#a-ok').onclick=async()=>{const r=await act(()=>api('POST','/admin/allocations',{ip:$('#a-ip').value,start:$('#a-s').value,end:$('#a-e').value||$('#a-s').value}),'Added');if(r)route()};
 }
-
-async function refreshLogs() {
-  if (!currentLogId) return;
-  try {
-    const r = await api(`/servers/${currentLogId}/logs?lines=200`);
-    const el = document.getElementById('log-content');
-    el.textContent = r.logs || '(no logs yet)';
-    el.scrollTop = 999999;
-  } catch(e) { document.getElementById('log-content').textContent = 'Error: ' + e.message; }
+window.adel=async id=>{await act(()=>api('DELETE','/admin/allocations/'+id));route()};
+async function aSettings(){
+const c=await api('GET','/admin/settings');
+$('#tb').innerHTML=`<div class="grid g2"><div class="card pad"><h2>Panel</h2>${field('Panel name',`<input id="st-n" value="${esc(c.name)}">`)}${field('Public host / IP shown to users',`<input id="st-h" value="${esc(c.host)}">`)}<div class="row" style="justify-content:flex-end"><button class="btn p" id="st-ok">Save</button></div></div><div class="card pad"><h2>Domain / HTTPS</h2><p class="mu" style="font-size:13px;margin-bottom:12px">Point your domain A record to this server IP first. HTTPS is issued automatically via Caddy. Leave empty to use IP:${c.port}.</p>${field('Domain',`<input id="st-d" placeholder="panel.example.com" value="${esc(c.domain)}">`)}${c.domain?`<p class="mu" style="font-size:12px;margin-bottom:10px">Current: <b>${esc(c.domain)}</b> — HTTPS active</p>`:''}<div class="row"><button class="btn p" id="st-dk">Connect domain</button>${c.domain?'<button class="btn d" id="st-drem">Remove domain</button>':''}</div></div></div>`;
+$('#st-ok').onclick=async()=>{const r=await act(()=>api('PUT','/admin/settings',{name:$('#st-n').value,host:$('#st-h').value}),'Saved');if(r)S.name=r.name};
+$('#st-dk').onclick=async()=>{const d=$('#st-d').value.trim();if(!d)return toast('Enter a domain first','e');const r=await act(()=>api('PUT','/admin/settings',{domain:d}),'Domain connected! HTTPS will activate shortly.');if(r)route()};
+if($('#st-drem'))$('#st-drem').onclick=async()=>{if(!confirm('Remove domain and go back to HTTP?'))return;await act(()=>api('PUT','/admin/settings',{domain:''}),'Domain removed');route()};
 }
-
-function populateConsoleSel() {
-  const sel = document.getElementById('console-sel'), prev = sel.value;
-  sel.innerHTML = '<option value="">Select server...</option>';
-  allServers.forEach(s => {
-    const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; sel.appendChild(o);
-  });
-  if (prev) sel.value = prev;
+function accountView(){
+$('#app').innerHTML=shell(`<h1>Account</h1><div class="grid g2" style="margin-top:16px"><div class="card pad"><h2>Email and username</h2>${field('Email',`<input id="ac-e" value="${esc(S.user.email)}">`)}${field('Username',`<input id="ac-n" value="${esc(S.user.username)}">`)}${field('Current password','<input id="ac-c1" type="password">')}<div class="row" style="justify-content:flex-end"><button class="btn p" id="ac-1">Save</button></div></div><div class="card pad"><h2>Password</h2>${field('New password','<input id="ac-p" type="password">')}${field('Current password','<input id="ac-c2" type="password">')}<div class="row" style="justify-content:flex-end"><button class="btn p" id="ac-2">Change password</button></div></div></div>`,'acc');
+$('#ac-1').onclick=async()=>{const r=await act(()=>api('PUT','/me',{email:$('#ac-e').value,username:$('#ac-n').value,current:$('#ac-c1').value}),'Saved');if(r)S.user=r};
+$('#ac-2').onclick=async()=>{const r=await act(()=>api('PUT','/me',{password:$('#ac-p').value,current:$('#ac-c2').value}),'Password changed');if(r){$('#ac-p').value='';$('#ac-c2').value=''}};
 }
-
-async function fetchLogsPage() {
-  const id = document.getElementById('console-sel').value;
-  if (!id) { toast('Please select a server!', 'error'); return; }
-  document.getElementById('console-status').textContent = 'Fetching...';
-  try {
-    const r = await api(`/servers/${id}/logs?lines=250`);
-    const out = document.getElementById('console-out');
-    out.textContent = r.logs || '(no logs yet)';
-    out.scrollTop = out.scrollHeight;
-    document.getElementById('console-status').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  } catch(e) { toast(e.message, 'error'); document.getElementById('console-status').textContent = 'Error'; }
+function cleanup(){if(es){es.close();es=null}if(cur){clearInterval(cur);cur=null}}
+let lastSrv=null;
+async function route(){
+cleanup();closeModal();
+if(!S.token){loginView();return}
+if(!S.user){try{const r=await api('GET','/me');S.user=r.user;S.name=r.name}catch{return}}
+const h=location.hash.replace(/^#/,'')||'/',p=h.split('/').filter(Boolean);
+try{
+if(p[0]==='s'){if(lastSrv!==p[1]){fileState={path:'/',sel:[]};lastSrv=p[1]}await serverView(p[1],p[2])}
+else if(p[0]==='admin')await adminView(p[1]);
+else if(p[0]==='account')accountView();
+else await homeView();
+}catch(e){toast(e.message,'e');if(/not found/i.test(e.message))location.hash='#/'}
 }
-
-function toggleAutoRefresh() {
-  const btn = document.getElementById('btn-auto');
-  if (autoTimer) {
-    clearInterval(autoTimer); autoTimer = null;
-    btn.textContent = '▶ Auto Refresh';
-  } else {
-    fetchLogsPage();
-    autoTimer = setInterval(fetchLogsPage, 4000);
-    btn.textContent = '⏹ Stop Auto';
-  }
-}
-
-async function loadUsersPage() {
-  try {
-    allUsers   = await api('/users');
-    allServers = await api('/servers');
-    renderUsersTable(allUsers);
-  } catch(e) { toast(e.message, 'error'); }
-}
-
-function renderUsersTable(list) {
-  const tbody = document.getElementById('users-tbody');
-  if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">No users</td></tr>';
-    return;
-  }
-  tbody.innerHTML = list.map(u => {
-    const roleBadge = { superadmin: '<span class="badge badge-purple">Super Admin</span>', subadmin: '<span class="badge badge-yellow">Sub-Admin</span>', user: '<span class="badge badge-blue">User</span>' }[u.role] || u.role;
-    const srvCount = u.assigned_servers ? u.assigned_servers.length : 0;
-    const isSA = u.role === 'superadmin';
-    return `<tr>
-      <td><div style="font-weight:600">${u.username}</div></td>
-      <td style="color:var(--muted)">${u.email}</td>
-      <td>${roleBadge}</td>
-      <td><span class="badge badge-blue">${isSA ? 'All' : srvCount + ' server' + (srvCount !== 1 ? 's' : '')}</span></td>
-      <td>
-        ${!isSA ? `<button class="btn btn-ghost btn-sm" onclick="openAssignModal('${u.id}','${u.username}')">Assign</button>
-        <button class="btn btn-ghost btn-sm" onclick="openEditUser('${u.id}')">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.username}')">Delete</button>` : '<span style="color:var(--muted);font-size:12px">Protected</span>'}
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-function filterUsers(q) {
-  renderUsersTable(allUsers.filter(u => u.username.toLowerCase().includes(q.toLowerCase()) || u.email.toLowerCase().includes(q.toLowerCase())));
-}
-
-function openAddUser() {
-  editingUserId = null;
-  document.getElementById('modal-user-title').textContent = 'New User';
-  document.getElementById('u-username').value = '';
-  document.getElementById('u-email').value    = '';
-  document.getElementById('u-pass').value     = '';
-  document.getElementById('u-role').value     = 'user';
-  const list = document.getElementById('user-assign-list');
-  list.innerHTML = '';
-  allServers.forEach(s => {
-    const chip = document.createElement('div');
-    chip.className = 'assign-chip'; chip.dataset.sid = s.id;
-    chip.textContent = s.name;
-    chip.onclick = () => chip.classList.toggle('selected');
-    list.appendChild(chip);
-  });
-  openModal('modal-user');
-}
-
-function openEditUser(uid) {
-  const u = allUsers.find(x => x.id === uid);
-  if (!u) return;
-  editingUserId = uid;
-  document.getElementById('modal-user-title').textContent = 'Edit User';
-  document.getElementById('u-username').value = u.username;
-  document.getElementById('u-email').value    = u.email;
-  document.getElementById('u-pass').value     = '';
-  document.getElementById('u-role').value     = u.role;
-  const list = document.getElementById('user-assign-list');
-  list.innerHTML = '';
-  allServers.forEach(s => {
-    const chip = document.createElement('div');
-    chip.className = 'assign-chip'; chip.dataset.sid = s.id;
-    chip.textContent = s.name;
-    if (u.assigned_servers && u.assigned_servers.includes(s.id)) chip.classList.add('selected');
-    chip.onclick = () => chip.classList.toggle('selected');
-    list.appendChild(chip);
-  });
-  openModal('modal-user');
-}
-
-async function saveUser() {
-  const username = document.getElementById('u-username').value.trim();
-  const email    = document.getElementById('u-email').value.trim();
-  const password = document.getElementById('u-pass').value;
-  const role     = document.getElementById('u-role').value;
-  const assigned_servers = [...document.querySelectorAll('#user-assign-list .assign-chip.selected')].map(c => c.dataset.sid);
-  if (!username || !email) { toast('Username and email are required!', 'error'); return; }
-  try {
-    if (editingUserId) {
-      const body = { username, email, role, assigned_servers };
-      if (password) body.password = password;
-      const r = await api(`/users/${editingUserId}`, 'PUT', body);
-      if (r.ok) { toast('User updated!', 'success'); closeModal('modal-user'); loadUsersPage(); }
-      else toast(r.error || 'Failed', 'error');
-    } else {
-      if (!password) { toast('Password is required!', 'error'); return; }
-      const r = await api('/users', 'POST', { username, email, password, role, assigned_servers });
-      if (r.ok) { toast('User created!', 'success'); closeModal('modal-user'); loadUsersPage(); }
-      else toast(r.error || 'Failed', 'error');
-    }
-  } catch(e) { toast(e.message, 'error'); }
-}
-
-function openAssignModal(uid, uname) {
-  assigningUserId = uid;
-  document.getElementById('assign-modal-user-name').textContent = 'Assigning to: ' + uname;
-  const u = allUsers.find(x => x.id === uid);
-  const list = document.getElementById('assign-modal-list');
-  list.innerHTML = '';
-  allServers.forEach(s => {
-    const chip = document.createElement('div');
-    chip.className = 'assign-chip'; chip.dataset.sid = s.id;
-    chip.textContent = s.name;
-    if (u && u.assigned_servers && u.assigned_servers.includes(s.id)) chip.classList.add('selected');
-    chip.onclick = () => chip.classList.toggle('selected');
-    list.appendChild(chip);
-  });
-  openModal('modal-assign');
-}
-
-async function saveAssign() {
-  if (!assigningUserId) return;
-  const server_ids = [...document.querySelectorAll('#assign-modal-list .assign-chip.selected')].map(c => c.dataset.sid);
-  try {
-    const r = await api(`/users/${assigningUserId}/assign`, 'POST', { server_ids });
-    if (r.ok) { toast('Servers assigned!', 'success'); closeModal('modal-assign'); loadUsersPage(); }
-    else toast(r.error || 'Failed', 'error');
-  } catch(e) { toast(e.message, 'error'); }
-}
-
-async function deleteUser(uid, uname) {
-  if (!confirm(`Delete user "${uname}"?`)) return;
-  try {
-    const r = await api(`/users/${uid}`, 'DELETE');
-    if (r.ok) { toast('User deleted', 'info'); loadUsersPage(); }
-    else toast(r.error || 'Failed', 'error');
-  } catch(e) { toast(e.message, 'error'); }
-}
-
-async function doBackupNow() {
-  toast('Running backup...', 'info');
-  try { const r = await api('/backup', 'POST'); toast(r.message || 'Backup done!', 'success'); }
-  catch(e) { toast('Backup failed: ' + e.message, 'error'); }
-}
-
-async function ping() {
-  try { const r = await api('/ping'); toast(`Connected! Uptime: ${Math.floor(r.uptime)}s`, 'success'); }
-  catch(e) { toast('Connection failed: ' + e.message, 'error'); }
-}
-
-function refreshAll() { loadDashboard(); toast('Refreshed', 'info'); }
-
-function toast(msg, type='info') {
-  const icons = { success: '✓', error: '✕', info: 'i' };
-  const el = document.createElement('div'); el.className = 'toast ' + type;
-  el.innerHTML = `<span class="t-ico ${type}" style="font-weight:700;font-size:12px">${icons[type]||'i'}</span><span>${msg}</span>`;
-  document.getElementById('toast-container').appendChild(el);
-  setTimeout(() => { el.style.animation = 'tOut .3s ease forwards'; setTimeout(() => el.remove(), 300); }, 3000);
-}
-
-async function initPanel() {
-  try {
-    const r = await api('/ping');
-    SESSION_ROLE = r.role || SESSION_ROLE;
-    SESSION_ID   = r.id   || SESSION_ID;
-    document.getElementById('sidebar-name').textContent   = r.user  || 'User';
-    document.getElementById('sidebar-role').textContent   = roleLabel(r.role);
-    document.getElementById('sidebar-avatar').textContent = (r.user || 'U')[0].toUpperCase();
-    document.getElementById('conn-dot').className   = 'dot green';
-    document.getElementById('conn-label').textContent = 'Connected';
-    applyRoleUI(r.role);
-    if (r.role === 'superadmin') { allUsers = await api('/users'); }
-    loadDashboard();
-  } catch(e) {
-    document.getElementById('conn-dot').className   = 'dot red';
-    document.getElementById('conn-label').textContent = 'Offline';
-    toast('Agent offline!', 'error');
-  }
-}
-
-if (TOKEN) {
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('main-layout').style.display = 'flex';
-  initPanel();
-}
+window.addEventListener('hashchange',route);
+route();
 </script>
 </body>
 </html>
 HTMLEOF
-success "Panel HTML written"
-
-section "Step 6: Domain & SSL"
-
-VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-
-if [ "$USE_SSL" = "true" ] && [ -n "$DOMAIN" ]; then
-  info "Configuring Caddy for $DOMAIN..."
-  cat > /etc/caddy/Caddyfile << CADDYEOF
-$DOMAIN {
-    reverse_proxy localhost:$WP
-}
-CADDYEOF
-  systemctl enable caddy > /dev/null 2>&1
-  systemctl restart caddy > /dev/null 2>&1
-  sleep 2
-  if systemctl is-active --quiet caddy; then
-    success "Caddy running — SSL issuing for $DOMAIN"
-    PANEL_URL="https://$DOMAIN"
-  else
-    warn "Caddy failed to start — check: systemctl status caddy"
-    PANEL_URL="http://$VPS_IP:$WP"
-  fi
+PORT=$(node -p "require('$APP/config.json').port")
+DOM=$(node -p "require('$APP/config.json').domain")
+IP=$(node -p "require('$APP/config.json').host")
+if [ -n "$DOM" ]; then
+  printf '%s {\n\treverse_proxy 127.0.0.1:%s\n}\n' "$DOM" "$PORT" > /etc/caddy/Caddyfile
+  systemctl enable caddy >/dev/null 2>&1
+  systemctl restart caddy
 else
-  systemctl stop caddy  > /dev/null 2>&1 || true
-  systemctl disable caddy > /dev/null 2>&1 || true
-  PANEL_URL="http://$VPS_IP:$WP"
+  systemctl stop caddy >/dev/null 2>&1
+  systemctl disable caddy >/dev/null 2>&1
 fi
-
-if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow "$WP"/tcp > /dev/null 2>&1
-  if [ "$USE_SSL" = "true" ]; then
-    ufw allow 80/tcp > /dev/null 2>&1
-    ufw allow 443/tcp > /dev/null 2>&1
-  fi
-  success "Firewall: port $WP allowed"
-fi
-success "Web setup done"
-
-section "Step 7: Starting Panel"
-
-info "Installing npm packages..."
-cd "$DIR" && npm init -y > /dev/null 2>&1
-success "npm ready"
-
-info "Starting via PM2..."
-pm2 delete saypanel-agent > /dev/null 2>&1 || true
-pm2 start "$DIR/index.js" --name saypanel-agent
-pm2 save > /dev/null 2>&1
-pm2 startup 2>/dev/null | grep "sudo" | bash > /dev/null 2>&1 || true
-success "PM2 running"
-
-info "Checking panel health..."
-sleep 3
-if curl -fs "http://127.0.0.1:$WP/api/health" 2>/dev/null | grep -q '"app":"saypanel"'; then
-  success "Panel is responding on port $WP"
-else
-  warn "Panel is not responding on port $WP — recent logs:"
-  pm2 logs saypanel-agent --lines 15 --nostream
-  error "Panel failed to start. Fix the problem above, then run this installer again."
-fi
-
-section "Step 8: Backup & Restore Script"
-
-if [ "$BACKUP_ENABLED" = "true" ]; then
-  info "Running first backup..."
-  if BACKUP_RESULT=$(node "$DIR/backup.js" 2>&1); then
-    success "$BACKUP_RESULT"
-  else
-    warn "First backup failed: $BACKUP_RESULT"
-  fi
-  success "restore.sh generated at /opt/saypanel/restore.sh"
-else
-  info "Backups disabled — no restore script generated"
-fi
-
+pm2 delete nexorhosting >/dev/null 2>&1
+pm2 start $APP/server.js --name nexorhosting --cwd $APP >/dev/null 2>&1
+pm2 save >/dev/null 2>&1
+pm2 startup systemd -u root --hp /root >/dev/null 2>&1
+command -v ufw >/dev/null 2>&1 && ufw allow $PORT/tcp >/dev/null 2>&1
+nohup sh -c 'docker pull ghcr.io/parkervcp/yolks:nodejs_20; docker pull ghcr.io/parkervcp/yolks:nodejs_22' >/dev/null 2>&1 &
 echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "${GREEN}        SayPanel v3.0 PREMIUM — Installed!${RESET}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${P}  ╔══════════════════════════════════════════╗${N}"
+echo -e "${P}  ║       NEXOR HOSTING v1 — Installation OK    ║${N}"
+echo -e "${P}  ╚══════════════════════════════════════════╝${N}"
 echo ""
-echo -e "  ${BOLD}Panel URL:${RESET}     ${CYAN}${PANEL_URL}${RESET}"
-echo -e "  ${BOLD}Login:${RESET}         ${SA_EMAIL}"
-echo -e "  ${BOLD}Username:${RESET}      ${SA_USER}"
-echo -e "  ${BOLD}Role:${RESET}          ${YELLOW}Super Admin${RESET}"
-if [ -n "$DOMAIN" ]; then
-  echo -e "  ${BOLD}Domain:${RESET}        ${DOMAIN} (SSL auto)"
-fi
+[ -n "$DOM" ] && echo -e "${G}  [+]${N} Panel URL  : ${B}https://$DOM${N}"
+echo -e "${G}  [+]${N} Panel URL  : ${B}http://$IP:$PORT${N}"
+[ -n "$FRESH" ] && echo -e "${Y}  [?]${N} Login with the email and password you just set."
 echo ""
-echo -e "  ${YELLOW}Roles:${RESET}"
-echo -e "  ${CYAN}Super Admin${RESET}  — full access, Users page, create/delete servers"
-echo -e "  ${CYAN}Sub-Admin${RESET}    — start/stop/logs for assigned servers"
-echo -e "  ${CYAN}User${RESET}         — view logs of assigned servers only"
+echo -e "${P}  >>>  Domain  : Admin > Settings${N}"
+echo -e "${P}  >>>  Ports   : Admin > Allocations (open in firewall too)${N}"
+echo -e "${P}  >>>  Eggs    : Admin > Eggs > Import${N}"
+echo -e "${P}  >>>  Users   : Admin > Users${N}"
 echo ""
-echo -e "  ${YELLOW}PM2 commands:${RESET}"
-echo -e "  pm2 logs saypanel-agent"
-echo -e "  pm2 restart saypanel-agent"
-echo ""
-
-if [ "$BACKUP_ENABLED" = "true" ]; then
-  echo -e "  ${YELLOW}If your VPS is ever lost — restore everything on a new VPS:${RESET}"
-  if [ "$USE_GDRIVE" = "true" ]; then
-    echo -e "  ${CYAN}Google Drive:${RESET} download SayPanel-Backups/restore.sh, upload it to the new VPS, then run:"
-    echo -e "    sudo bash restore.sh"
-  fi
-  if [ "$USE_SUPA" = "true" ]; then
-    echo -e "  ${CYAN}Supabase:${RESET} on the new VPS run:"
-    echo -e "    curl -fsSL -H \"Authorization: Bearer $SUPA_KEY\" -H \"apikey: $SUPA_KEY\" \"$SUPA_URL/storage/v1/object/$SUPA_BUCKET/restore.sh\" -o restore.sh && sudo bash restore.sh"
-  fi
-  if [ "$USE_TG" = "true" ]; then
-    echo -e "  ${CYAN}Telegram:${RESET} restore.sh was sent to your chat. Run: sudo bash restore.sh"
-  fi
-  echo -e "  ${CYAN}Local copy:${RESET} /opt/saypanel/restore.sh"
-  echo -e "  ${RED}restore.sh contains your Drive/Supabase credentials — keep it private.${RESET}"
-  echo ""
-fi
-
-echo -e "  ${BOLD}Open in browser: ${CYAN}${PANEL_URL}${RESET}"
-echo -e "  If it does not open, allow inbound TCP port ${WP} in your cloud firewall (Azure NSG / AWS security group)."
+echo -e "${P}  (c) 2026 NEXOR HOSTING. All Rights Reserved.${N}"
 echo ""
